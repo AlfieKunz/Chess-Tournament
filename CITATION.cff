@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this code or data in your work, please cite the associated preprint."
+authors:
+- family-names: "Kunz"
+  given-names: "Alfie"
+title: "Chess AI Sui-Style Tournament & Benchmarking System"
+version: 1.0
+date-released: 2025-08-29
+url: "https://github.com/AlfieKunz/Chess-Tournament"
