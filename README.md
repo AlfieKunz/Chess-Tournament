@@ -22,58 +22,28 @@ Also attached is the python code for generating robust, equal, and 'fun' startin
 
 ## Features and Highlights
 
-**Tournament & Match Engine**  
-✅ Fully configurable head-to-head tournaments — set the number of games and per-move thinking time at launch.  
-✅ Automatic colour-swap fixtures: once half the match-up is complete, every starting position is replayed with colours reversed to cancel out first-move bias.  
-✅ Live pause/resume — hit Space mid-tournament to freeze play, view a running scoreboard and an ETA, then resume with another keystroke.  
-✅ Self-healing invalid-game handling: any game that throws an exception (illegal move, engine fault, etc.) is excluded from the results and logged separately rather than halting the tournament.  
-✅ Auto-adapts the total match count if the opening-position library runs out early, instead of crashing.  
-✅ Rolling and final scoreboards, including elapsed and extrapolated remaining tournament time.
+### Version Comparer
+✅ Fully configurable head-to-head Chess AI tournaments, with granular controls of AI models and their settings (eg: transposition tables, aspiration window width, PVS, bitmasked move generation, move-reduction thresholds, etc) for controlled configuration testing), opening positions, and time control.  
+✅ Unbias games handling, by allowing each player to play as both white and black for each position (swaps once half the match-up is complete).  
+✅ "Plug & Play" mechanics for easily loading two independently-versioned AI builds side-by-side via separate namespace imports — swap either engine without touching the tournament logic.  
+✅ Detection and graceful external adaptation of legacy Chess AI features, such as old approaches to multithreading (five per-depth thread allocation, vs newer iterative deepening), Option Strict, logarithmic material-adaptive starting search depth (CalculateAbsoluteDepth), extending of allocated time if needed, etc.  
+✅ Full chess endstate detection: checkmates, stalemates (no legal moves, or insufficient material), threefold repetitions, and the 50-move rule. For legacy AIs, the latter two are handled externally via a robst Zobrist hashing engine (random 64-bit key generation, full position/castling-rights/en-passant hashing), and per-game position tracking.  
+✅ Native iterative deepening and advanced forced-mate completion (and future depth allocation) for modern engines.  
+✅ Escalated warnings if a player is unable to make a move in the allocated time (initial warning, emergency forced 2-ply search).  
+✅ Robust handling of invalid moves and games: detection of illegal moves, and safe crashing of players, logging, and exclusion from the results.  
+✅ Well-packed, colourful, and intuitive live showcase of each game, using a colour-coded unicode board rendering, real-time search depth and evaluation, live-scrolling (self-refreshing) PGN transcript, initial and current FEN.  
+✅ In-depth tournament statistics available throughout the match-up, using colourful win-loss ratio graphics, including win-loss graphics, elapsed time, and AI 'outclasses' (for where a player won a position as both white and black).  
+✅ Live pause / resume feature (via SPACE), with updated scorings and tournament statistics (including elapsed and extrapolated remaining tournament time).  
 
-**Multi-Version AI Compatibility ("Plug & Play")**  
-✅ Loads two independently-versioned AI builds side-by-side via separate namespace imports — swap either engine without touching the tournament logic.  
-✅ Automatic legacy-version detection, parsed straight from each engine's semantic version string.  
-✅ Legacy 'Multiple-Depth Multithreading' emulation — for pre-v7.0 engines lacking native iterative deepening, five parallel searches are launched at staggered depths (extending further if time allows) to reconstruct modern iterative-deepening performance externally.  
-✅ Native iterative-deepening handler for modern engines, seeding each depth's search with the previous depth's best move to sharpen alpha-beta pruning.  
-✅ Forced-mate short-circuiting — the moment any thread reports a forced checkmate, every sibling search thread is aborted instantly.  
-✅ Material-adaptive search depth, scaling logarithmically with the pieces remaining so both AIs dig deeper automatically as the game heads into the endgame.  
-✅ Mate-distance-aware depth capping, so a confirmed forced mate is searched only as deep as needed to deliver it.  
-✅ Per-engine tunable search parameters (transposition tables, aspiration window width, PVS, bitmasked move generation, move-reduction thresholds) for controlled configuration testing.
-
-**Time Control**  
-✅ Shared, configurable per-move thinking time for both AIs.  
-✅ Three-tier time-overrun handling: a clean abort once a move is ready, an escalated warning with bonus time if a player stalls, and a forced 2-ply 'emergency' search if a legacy engine blows its budget twice in a row.
-
-**Arbiter & Rules Enforcement**  
-✅ Full endgame detection — checkmate, stalemate, threefold repetition, and the 50-move rule.  
-✅ Draw-by-insufficient-material detection, covering K v K, K v K+minor piece, and K+B v K+B on matching bishop colour complexes.  
-✅ From-scratch Zobrist hashing engine (random 64-bit key generation, full position/castling-rights/en-passant hashing) as a fallback repetition detector for engines that can't track it natively.  
-✅ Independent game-history tracking for each engine.
-
-**Live Terminal Visualisation**  
-✅ Colour-coded Unicode board rendering, distinguishing piece colour and light/dark squares at a glance.  
-✅ Real-time search depth and evaluation readout alongside the board.  
-✅ Live-scrolling PGN transcript printed beside the board, with overflow handling for very long games.  
-✅ Non-scrolling, self-refreshing display — the board, evaluation, and transcript redraw in place each move instead of filling the console with scrollback.  
-✅ Custom score formatter, converting raw evaluations into standard notation (e.g. +2.3, or +M5 for mate-in-5).  
-✅ Colour-coded win/loss/draw scoreboard with a proportional ASCII progress bar that resizes to fit the console width.  
-✅ 'Outclass' tracking — flags starting positions where one AI won as both White and Black, a stronger dominance signal than a raw win tally.
-
-**Opening Position Generator (Python + Stockfish)**  
-✅ Standalone tool for building a curated bank of fair, balanced starting positions to feed the tournament.  
-✅ Sources genuine positions from human master games via the Lichess Elite PGN database, rather than synthetic setups.  
-✅ Early-game-biased random move sampling within a configurable move-number window.  
-✅ Stockfish equality filter — only positions within a configurable centipawn threshold of dead level are accepted, keeping every starting point genuinely fair.  
-✅ Minimum piece-count floor, filtering out over-simplified endgame positions.  
-✅ Minimum remaining-game-length filter, ensuring every sampled position still has a real contest ahead of it.  
-✅ Enforces White-to-move and de-duplicates identical FENs via a hash set.  
+### Opening Position Generator
+✅ Standalone tool for building a curated bank of fair, balanced starting positions (from top-level human games from the Lichess Elite Databse) to feed the tournament.  
+✅ Filtering of equal positions via evaluations from Stockfish.  
+✅ Early-game-biased random move sampling, within a configurable move-number window.  
+✅ Filtering of minimum piece count, filtering out over-simplified endgame positions.  
+✅ Filtering of minimum remaining-game-length filter, filtering out positions that don't have much contest ahead of them.  
 ✅ Randomised game-skipping between samples to maximise positional diversity.  
 ✅ Automatic PGN wraparound if the source database is exhausted before the target count is reached.  
 ✅ Live progress logging and total-runtime benchmarking.  
-✅ Configurable target position count and Stockfish analysis depth.  
-✅ Clean output file: standard starting position followed by a sorted, de-duplicated FEN list.
-
-✅ Graceful adaptation of old Chess AI features, such as old approaches to multithreading (per-depth thread allocation, vs newer iterative deepening), Option Strict, etc.  
 
 ---
 
@@ -87,7 +57,7 @@ The best way to interact with this program for full control is directly through 
 >1) First, drag and drop the relevant AI files into either the "AIPlayer1" or "AIPlayer2" folder, from either a model of choice from the "AI Archives" folder, or from any [Chess AI GitHub release](https://github.com/AlfieKunz/Chess-Game-AI/releases) succeeding v9.0. In the latter case, specifically copy the files {"AI.vb", "AILookupTables.vb", "CoreMethods.vb", "GameHistory.vb", "PieceLegalMoveGenerators.vb", "SubObjects.vb"}.
 >2) Open the project solution in your IDE of choice, and click "Clean Solution" before building (to reset the AIPlayer?.vbproj files).
 >3) To change any AI settings for a fully customisable tournament, navigate to the AdjustIndividualAISettings subroutine in "Program.vb" and adjust the AI1Settings or AI2Settings classes directly. For more information of what settings can be adjusted, and what each of them do, see the "AISearchSettings" class in the "SubObjects.vb" file of each AI player.
->4) Run the project, and input the number of games and maximum AI thinking time per move to run the tournament!
+>4) Run the project, and input the number of games and maximum AI thinking time per move to run the tournament! N/2 opening positions will be loaded for "NoMatches = N", where each position is player twice (once for Player 1 as white, the other as black).
 >5) At any time, press SPACE to pause the simulation (at the conclusion of the current game) to output the current tournament statistics, and estimated time of completion. Then, press SPACE again to instantly resume the tournament.
 
 ---
