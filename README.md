@@ -7,7 +7,7 @@
 
 ---
 
-A small program that allows multiple versions of my [**Chess AI**](https://github.com/AlfieKunz/Chess-Game-AI) to compete in a tournement system, across a customisable variety of starting positions and thinking time. Supports a wide variety of AI models across various legacy designs and formats in an intuitive 'plug and play' methodology, with live game showcases and statistics via a colourful, information-rich terminal log. To help with the smooth running of games, 'arbiter' controls can be managed via the program, allowing for termination of games from broken or illegal moves, and across the full spread of chess win/draw conditions.
+A small program that allows multiple versions of my [**Chess AI**](https://github.com/AlfieKunz/Chess-Game-AI) to compete in a **tournament system**, across a customisable variety of starting positions and thinking time. Supports a wide variety of AI models across various legacy designs and formats in an intuitive **'plug and play'** methodology, with live game showcases and statistics via a colourful, information-rich terminal log. To help with the smooth running of games, 'arbiter' controls can be managed via the program, allowing for termination of games from broken or illegal moves, and across the full spread of chess win/draw conditions.
 
 This work is self-motivated and self-funded, and forms a small part of my 'commercial grade' [**Chess Game & Artificial Intelligence**](https://github.com/AlfieKunz/Chess-Game-AI): new features, flavours of AI, and possible bugs are always tested and compared using this system, and helps me build the strongest AI possible! :) Data from this program can also be used to calculate a relative ELO score for each AI version.
 
