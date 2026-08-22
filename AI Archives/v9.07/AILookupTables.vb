@@ -222,6 +222,6 @@ Partial Public Class AI
 
     Dim EvalPastPawnBonus() As Integer = {0, 0, 10, 15, 35, 60, 90, 120, 0}
     Dim EvalIsolatedPawnPenalty() As Integer = {0, 0, 22, 22, 22, 18, 10, 5, 0}
-    Dim EvalDoubledPawnPenalty As Integer = 25
+    Dim EvalDoubledPawnPenalty As Integer = 38
 
 End Class
