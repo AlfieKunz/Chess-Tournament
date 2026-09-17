@@ -64,7 +64,7 @@ The best way to interact with this program for full control is directly through 
 
 ## Installation and Folder Structure
 
-### Required Software: Visual Studio (.NET 8.0).
+### Required Software: Visual Studio (.NET 8.0, x64).
 
 To install, simply clone this repository using the following terminal prompts.
 ```bash
