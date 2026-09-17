@@ -142,7 +142,7 @@ Module Program
         Console.ForegroundColor = ConsoleColor.Blue
         Console.WriteLine("Loading Training Positions...")
         Dim StartPositions((NoMatches + 1) \ 2 - 1) As String
-        Using SR As New StreamReader(AppDomain.CurrentDomain.BaseDirectory & "OpeningPositions.txt")
+        Using SR As New StreamReader(AppDomain.CurrentDomain.BaseDirectory & "\Assets\OpeningPositions.txt")
             Dim line As String
             Dim Counter As Integer
             While Counter < StartPositions.Count

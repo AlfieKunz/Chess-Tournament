@@ -68,9 +68,7 @@ Public Class GameHistory
     'Subroutine that adds a new PGN Value to the GameHistory array.
     Public Sub PushPGN(ByVal Value As String, Optional ByVal MoveArray As Boolean = False)
         If MoveArray Then Move()
-        'As the Zobrist value will always be pushed before the PGN value (and hence MainSize will be incremented),
-        'add the PGN value to the index = MainSize - 1.
-        PGNMain(MainSize - 1) = Value
+        PGNMain(MainSize) = Value
         'If the move was not a pawn move or a capture, we increment the half-move counter. Otherwise, we reset it.
         If (Value(0) >= "a" AndAlso Value(0) <= "h") OrElse Value.IndexOf("x"c) >= 0 Then
             MainHalfSize = 0
@@ -124,7 +122,7 @@ Public Class GameHistory
         GetFormattedPGNString = ""
         If MainSize > 0 Then
             'Adds each PGN to the string.
-            For n = 1 To MainSize - 1
+            For n = 0 To MainSize - 1
                 'PGNs are formatted as such: "1. WMove BMove 2. WMove BMove 3. ..."
                 '... so add the move number for every other move.
                 If n Mod 2 = 1 Then GetFormattedPGNString &= (n \ 2 + 1) & ". "

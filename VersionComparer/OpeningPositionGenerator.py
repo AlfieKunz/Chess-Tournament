@@ -4,19 +4,21 @@ import chess.engine
 import time
 import random
 
-StockfishPath = "stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe"
-StockfishDepth = 15
-PGNPath = "lichess_elite_2021-11/lichess_elite_2021-11.pgn"
-OutputPath = "OpeningPositions.txt"
+dir = "bin/Debug/net8.0/Assets/"
+StockfishPath = dir + "stockfish/stockfish-windows-x86-64-universal.exe"
+StockfishDepth = 18
+PGNPath = dir + "lichess_elite_2021-12.pgn"
+OutputPath = dir + "OpeningPositions.txt"
 
-TotalPositionCount = 250
+TotalPositionCount = 750
 StartingFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+IncludeStartingFEN = False
 
-MinMoveCount = 8           # The minimum full move number for a random position
+MinMoveCount = 10           # The minimum full move number for a random position
 MaxMoveCount = 30          # The maximum full move number for a random position
-MinMovesAfterPosition = 20 # Game must continue for at least this many moves AFTER the position
-MinPieceCount = 15         # Position must have at least this many pieces on the board
-EvalCutoffPoint = 10       # Centipawn threshold for equality (20 cp = 0.2 pawns)
+MinMovesAfterPosition = 25 # Game must continue for at least this many moves AFTER the position
+MinPieceCount = 20         # Position must have at least this many pieces on the board
+EvalCutoffPoint = 25       # Centipawn threshold for equality (20 cp = 0.2 pawns)
 
 MinGameSkipValue = 10      # Minimum number of games to skip to get a new random game
 MaxGameSkipValue = 100     # Maximum number of games to skip
@@ -31,7 +33,7 @@ NoGames = 0
 st = time.time()
 
 with open(PGNPath) as PGN:
-    while len(Positions) < TotalPositionCount - 1:
+    while len(Positions) < TotalPositionCount - (1 if IncludeStartingFEN else 0):
         TempGame = chess.pgn.read_game(PGN)
         if TempGame is None:
             print("Reached end of PGN file. Resetting...")
@@ -64,7 +66,7 @@ with open(PGNPath) as PGN:
         Eval = Stockfish.analyse(Board, chess.engine.Limit(depth=StockfishDepth))["score"].white().score(mate_score=10000)
         if abs(Eval) <= EvalCutoffPoint:
             Positions.add(Board.fen())
-            print(f"Found {len(Positions) + 1}/{TotalPositionCount} | Move {Board.fullmove_number} | Eval: {Eval/100:.2f} | {Board.fen()}")
+            print(f"Found {len(Positions) + (1 if IncludeStartingFEN else 0)}/{TotalPositionCount} | Move {Board.fullmove_number} | Eval: {Eval/100:.2f} | {Board.fen()}")
             
         for _ in range(random.randint(MinGameSkipValue, MaxGameSkipValue)):
             if chess.pgn.skip_game(PGN) is None:
@@ -75,7 +77,7 @@ ft = time.time()
 print(f"Done! :D Found {len(Positions)} random positions in {ft - st:.2f} seconds.")
 
 with open(OutputPath, "w") as f:
-    f.write(f"{StartingFEN}\n")
+    if IncludeStartingFEN: f.write(f"{StartingFEN}\n")
     for fen in sorted(list(Positions)):
         f.write(f"{fen}\n")
         

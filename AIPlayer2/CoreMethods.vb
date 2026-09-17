@@ -2,6 +2,7 @@
 'my AI class (either via instavintiation or by inheritance). It will contain the algorithms that will be used by both my Chess
 '& AI classes, such as the ‘TFTable’ Generator, ‘DoesMoveResolveCheck’, 'Move Converters', and others.
 Imports System.Data.OleDb
+Imports System.Runtime.CompilerServices
 Imports System.Xml.XPath
 
 Partial Public Class CoreMethods
@@ -9,7 +10,9 @@ Partial Public Class CoreMethods
     'and debugging.
     Public MasterTrueTable(7, 7), TrueTable(7, 7) As Char
     Public CannotCastle As New CanCastle
-    Private Shared ReadOnly PieceValue(9) As Int16 'Array Containing the Value or Weight of each Piece.
+    Private Shared ReadOnly PieceValue(9) As Integer 'Array Containing the Value or Weight of each Piece.
+    Protected Shared MVVLVAValues(9, 9) As UInt16 'Array Containing the score associated with each possible capture configuration in chess.
+    'This is used for move ordering, and represents the premise of encouraging high captures, and capturing _with_ low material.
 
     Protected Shared ReadOnly ZobristHashTable(9, 1, 7, 7) As UInt64 '(a, b, c, d), where a = piece type, b = piece colour, c = x-coor, d = y-coor.
     'a is Similar to PieceValue: use (Asc(UCase(PieceName)) Mod 11) to calculate - [2] used for EnPassant square.
@@ -19,18 +22,31 @@ Partial Public Class CoreMethods
         'Sets PieceValues variables using a Hash Function (Upper Case letter --> ASCII, then MOD 11). This
         'creates a unique index / row in the PieceValue array for each piece and its corresponding weight,
         'so its value can be searched up quickly. PieceValue(Asc(UCase(Board(x, y))) Mod 11)
-        PieceValue(0) = GlobalConstants.PieceWeight.Bishop * 100 'Bishop Weight
-        PieceValue(1) = GlobalConstants.PieceWeight.Knight * 100 'Knight Weight
-        PieceValue(3) = GlobalConstants.PieceWeight.Pawn * 100 'Pawn Weight
-        PieceValue(4) = GlobalConstants.PieceWeight.Queen * 100 'Queen Weight
-        PieceValue(5) = GlobalConstants.PieceWeight.Rook * 100 'Rook Weight
-        PieceValue(9) = GlobalConstants.PieceWeight.King * 100 'King Weight
+        PieceValue(0) = GlobalConstants.PieceWeight.Bishop 'Bishop Weight
+        PieceValue(1) = GlobalConstants.PieceWeight.Knight 'Knight Weight
+        PieceValue(3) = GlobalConstants.PieceWeight.Pawn 'Pawn Weight
+        PieceValue(4) = GlobalConstants.PieceWeight.Queen 'Queen Weight
+        PieceValue(5) = GlobalConstants.PieceWeight.Rook 'Rook Weight
+        PieceValue(9) = GlobalConstants.PieceWeight.King 'King Weight
+
+        'Loads the appropriate values into MVA-LVA. For more info, see rustic-chess.org/search/ordering/mvv_lva.html
+        MVVLVAValues = {
+            {33, 34, 0, 35, 31, 32, 0, 0, 0, 30}, 'Victim = Bishop.
+            {23, 24, 0, 25, 21, 22, 0, 0, 0, 20}, 'Victim = Knight.
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+            {13, 14, 0, 15, 11, 12, 0, 0, 0, 10}, 'Victim = Pawn.
+            {53, 54, 0, 55, 51, 52, 0, 0, 0, 50}, 'Victim = Queen.
+            {43, 44, 0, 45, 41, 42, 0, 0, 0, 40}, 'Victim = Rook.
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}} 'Victim = King.
 
         'Creates MasterTrueTable and TrueTable.
         For x As Byte = 0 To 7
             For y As Byte = 0 To 7
-                MasterTrueTable(x, y) = "T"
-                TrueTable(x, y) = "T"
+                MasterTrueTable(x, y) = "T"c
+                TrueTable(x, y) = "T"c
             Next
         Next
 
@@ -44,8 +60,8 @@ Partial Public Class CoreMethods
                         For y As Byte = 0 To 7
                             For z As Byte = 0 To 7
                                 'Produce two random 32-bit numbers
-                                RNDOne = RND.Next()
-                                RNDTwo = RND.Next()
+                                RNDOne = CULng(RND.Next())
+                                RNDTwo = CULng(RND.Next())
                                 'Combine these numbers together into a 64-bit number by applying a 32-bit left shift to RNDOne,
                                 'then combining this with RNDTwo via a bitwise OR operation.
                                 ZobristHashTable(w, x, y, z) = (RNDOne << 32) Or RNDTwo
@@ -56,12 +72,19 @@ Partial Public Class CoreMethods
         Next
         'Fills HasConstants with random 64-bit numbers.
         For n As Byte = 0 To 4
-            RNDOne = RND.Next()
-            RNDTwo = RND.Next()
+            RNDOne = CULng(RND.Next())
+            RNDTwo = CULng(RND.Next())
             HashConstants(n) = (RNDOne << 32) Or RNDTwo
         Next
     End Sub
 
+
+
+
+    Private ZeroAsc As Integer = AscW("0"c)
+    Public Function CCharInt(ByVal Chr As Char) As Integer
+        Return AscW(Chr) - ZeroAsc
+    End Function
 
 
 
@@ -83,29 +106,29 @@ Partial Public Class CoreMethods
         WCanCastle.CannotCastle()
         BCanCastle.CannotCastle()
         EnPassant = "-"
-        Dim x As Byte = 0
-        Dim y As Byte = 0
+        Dim x, y As Integer
         Dim tempArray(7, 7) As Char
-        Dim SpaceLocation As Byte
-        For n As UInt16 = 0 To Len(FEN) - 1
+        Dim SpaceLocation As Integer
+        For n = 0 To Len(FEN) - 1
             Select Case FEN(n)
-                Case "/" '= end of board row. Reset column index and increment row index.
+                Case "/"c '= end of board row. Reset column index and increment row index.
                     y += 1
+                    If x <> 8 Then Throw New Exception($"Incorrect Length on Row {y}.")
                     x = 0
-                Case "A" To "Z", "a" To "z" '= name of piece - add name of piece to board index.
+                Case "A"c To "Z"c, "a"c To "z"c '= name of piece - add name of piece to board index.
                     tempArray(x, y) = FEN(n)
-                    If FEN(n) = "K" Then
+                    If FEN(n) = "K"c Then
                         WKPos = x & y
-                    ElseIf FEN(n) = "k" Then
+                    ElseIf FEN(n) = "k"c Then
                         BKPos = x & y
                     End If
                     x += 1
-                Case "0" To "8" 'Set of empty squares.
-                    For m As UInt16 = 1 To Val(FEN(n))
-                        tempArray(x, y) = " "
+                Case "0"c To "8"c 'Set of empty squares.
+                    For m = 1 To Integer.Parse(FEN(n))
+                        tempArray(x, y) = " "c
                         x += 1
                     Next
-                Case " "
+                Case " "c
                     'Checks for pawns incorrectly placed on the 1st or 8th rank. If we detect any, then we provoke an
                     'intentional crash, which our encapsulating Try-Catch detects and promptly reverses.
                     For m As Byte = 0 To 7
@@ -121,7 +144,7 @@ Partial Public Class CoreMethods
                     End If
                     FEN = Right(FEN, Len(FEN) - SpaceLocation - 3)
                     'Creates castling privileges (as long as the pieces are in the correct space).
-                    For m As UInt16 = 0 To Len(FEN) - 1
+                    For m = 0 To Len(FEN) - 1
                         If FEN(m) = "K" AndAlso (tempArray(4, 7) = "K" AndAlso tempArray(7, 7) = "R") Then
                             WCanCastle.KS = True
                         ElseIf FEN(m) = "Q" AndAlso (tempArray(4, 7) = "K" AndAlso tempArray(0, 7) = "R") Then
@@ -143,8 +166,10 @@ Partial Public Class CoreMethods
     End Function
 
     'Overloads of the above subroutine, but for Bitvalues for KPos, and EnPassant.
-    Public Function FENConverter(ByVal FEN As String, ByRef WCanCastle As CanCastle, ByRef BCanCastle As CanCastle, ByRef WKPos As Byte, ByRef BKPos As Byte, ByRef EnPassant As Byte, ByRef IsWhite As Boolean) As Char(,)
-        Dim TempWKPos, TempBKPos, TempEnPassant As String
+    Public Function FENConverter(ByVal FEN As String, ByRef WCanCastle As CanCastle, ByRef BCanCastle As CanCastle, ByRef WKPos As Int16, ByRef BKPos As Int16, ByRef EnPassant As Int16, ByRef IsWhite As Boolean) As Char(,)
+        Dim TempWKPos As String = ""
+        Dim TempBKPos As String = ""
+        Dim TempEnPassant As String = ""
         Dim TempBoard(,) As Char
         TempBoard = FENConverter(FEN, WCanCastle, BCanCastle, TempWKPos, TempBKPos, TempEnPassant, IsWhite)
         WKPos = ConvertStringToBitCoor(TempWKPos)
@@ -154,12 +179,12 @@ Partial Public Class CoreMethods
     End Function
 
     'Function which converts the current board position into its FEN counterpart.
-    Public Function ConvertToFEN(ByVal Board(,) As Char, ByVal WCanCastle As CanCastle, ByVal BCanCastle As CanCastle, ByVal EnPassant As Byte, ByVal isWhite As Boolean) As String
-        Dim Counter As Byte = 0 '= the number of blank spaces in a row on the board.
+    Public Function ConvertToFEN(ByVal Board(,) As Char, ByVal WCanCastle As CanCastle, ByVal BCanCastle As CanCastle, ByVal EnPassant As Int16, ByVal isWhite As Boolean) As String
+        Dim Counter As Integer = 0 '= the number of blank spaces in a row on the board.
         ConvertToFEN = ""
         For y As Byte = 0 To 7
             For x As Byte = 0 To 7
-                If Board(x, y) = " " Then
+                If Board(x, y) = " "c Then
                     Counter += 1
                 Else 'If necessary, add Counter to the FEN & add the piece name to the FEN.
                     If Counter > 0 Then
@@ -173,7 +198,7 @@ Partial Public Class CoreMethods
             ConvertToFEN &= "/" 'Creates new row break, and begins on the next one.
             Counter = 0
         Next
-        ConvertToFEN = ConvertToFEN.TrimEnd("/") 'Removes the last character from the FEN ("/").
+        ConvertToFEN = ConvertToFEN.TrimEnd("/"c) 'Removes the last character from the FEN ("/").
         If isWhite Then
             ConvertToFEN &= " w "
         Else
@@ -193,13 +218,19 @@ Partial Public Class CoreMethods
         Return ConvertToFEN
     End Function
 
+    'Function which removes all the Move Counts (ie: the full-move and half-move counts) from a FEN.
+    'Eg: 5B2/NR6/1np5/p7/p1kp4/K4Q2/3P4/8 w - - 2 16  -->  5B2/NR6/1np5/p7/p1kp4/K4Q2/3P4/8 w - -
+    Public Function StripFENOfMoveCounts(ByVal FEN As String) As String
+        Dim FENFullCutOff As String = FEN.Substring(0, FEN.LastIndexOf(" "c))
+        Return FENFullCutOff.Substring(0, FENFullCutOff.LastIndexOf(" "c))
+    End Function
 
 
     'Function which chcecks if the EnPassant square (given by a FEN) is valid on the board.
     Public Function CheckEnPassantSquareIsLegal(ByVal Board(,) As Char, ByVal EnPassant As String, ByVal isWhite As Boolean) As Boolean
         If EnPassant = "-" OrElse EnPassant = Nothing Then Return True
-        Dim XCoor As SByte = Val(EnPassant(0))
-        Dim YCoor As SByte = Val(EnPassant(1))
+        Dim XCoor As Integer = CCharInt(EnPassant(0))
+        Dim YCoor As Integer = CCharInt(EnPassant(1))
         'Checks that the row is correct, and that there is an enemy pawn behind the square.
         If isWhite AndAlso YCoor = 2 AndAlso Board(XCoor, YCoor + 1) = "p" Then
             'Checks that there is a friendly pawn next to that enemy pawn.
@@ -214,7 +245,7 @@ Partial Public Class CoreMethods
 
 
     'Subroutine which outputs a given board to the console.
-    Protected Sub OutputBoardToConsole(ByRef Board(,) As Char)
+    Public Sub OutputBoardToConsole(ByRef Board(,) As Char)
         For y As Byte = 0 To 7
             For x As Byte = 0 To 7
                 If Board(x, y) = " " Then
@@ -237,15 +268,16 @@ Partial Public Class CoreMethods
             Next
             Console.WriteLine()
         Next
-        Console.ResetColor()
+        Console.ForegroundColor = ConsoleColor.White
         Console.WriteLine()
     End Sub
 
     'Subroutine which outputs a given BitMove (as used by my AI) to the console.
-    Protected Sub OutputBitMoveToConsole(ByVal Move As UInt16)
+    Protected Sub OutputBitMoveToConsole(ByVal Move As UInt16, Optional ByVal PrecedingText As String = "")
         'Converts the BitMove to binary (base 2).
-        Dim BinaryString As String = (Convert.ToString(Move, 2)).PadLeft(16, "0")
+        Dim BinaryString As String = (Convert.ToString(Move, 2)).PadLeft(16, "0"c)
         Dim OldMove, NewMove As String
+        If PrecedingText <> "" Then Console.Write(PrecedingText)
         For n As Byte = 0 To 15
             Select Case n
                 Case 0
@@ -290,105 +322,121 @@ Partial Public Class CoreMethods
         Console.WriteLine(" (" & CoorToPGNConverter(OldMove) & CoorToPGNConverter(NewMove) & ").")
     End Sub
 
+    Protected Sub OutputBitMaskToConsole(ByVal Mask As ULong, Optional ByVal PawnPosition As Integer = -1, Optional ByVal EnemyPawnMask As ULong = 0UL)
+        Console.ForegroundColor = ConsoleColor.DarkCyan
+        Console.WriteLine("Denary: " & Mask)
+        Dim BinaryMask As String = String.Join("", BitConverter.GetBytes(CULng(Mask)).Reverse().Select(Function(b) Convert.ToString(b, 2).PadLeft(8, "0"c)))
+        Dim BinaryEnemyMask As String = String.Join("", BitConverter.GetBytes(CULng(EnemyPawnMask)).Reverse().Select(Function(b) Convert.ToString(b, 2).PadLeft(8, "0"c)))
+        Dim Counter As Integer
+        For i = 63 To 0 Step -1
+            If i = PawnPosition Then
+                Console.ForegroundColor = ConsoleColor.Cyan
+            ElseIf BinaryMask(i) = "1"c Then
+                Console.ForegroundColor = If(BinaryMask(i) = BinaryEnemyMask(i), ConsoleColor.DarkYellow, ConsoleColor.Green)
+            Else
+                Console.ForegroundColor = ConsoleColor.Red
+            End If
+            Console.Write(BinaryMask(i))
+            Counter += 1
+            If Counter = 8 Then Counter = 0 : Console.WriteLine()
+        Next
+        Console.WriteLine()
+    End Sub
+
+
     'Subroutine which constructs the coordinates of a Move structure, from an AI's BitMove.
-    Protected Sub AddBitMoveToMove(ByRef TempMove As Move, ByVal BitMove As UInt16)
-        TempMove.OldMoveX = (BitMove And 3584) >> 9
-        TempMove.OldMoveY = (BitMove And 448) >> 6
-        TempMove.NewMoveX = (BitMove And 56) >> 3
-        TempMove.NewMoveY = BitMove And 7
+    Protected Function ConvertBitMoveToMove(ByVal BitMove As UInt16) As Move
+        Dim TempMove As New Move
+        ConvertBitMoveToMove(TempMove, BitMove)
+        Return TempMove
+    End Function
+    Protected Sub ConvertBitMoveToMove(ByRef TempMove As Move, ByVal BitMove As UInt16)
+        TempMove.OldMoveX = CStr((BitMove And 3584US) >> 9)
+        TempMove.OldMoveY = CStr((BitMove And 448US) >> 6)
+        TempMove.NewMoveX = CStr((BitMove And 56US) >> 3)
+        TempMove.NewMoveY = CStr(BitMove And 7)
         If (BitMove And 28672) = 4096 Then
-            TempMove.Code = "Q"
+            TempMove.Code = "Q"c
         ElseIf (BitMove And 28672) = 28672 Then
-            TempMove.Code = "N"
+            TempMove.Code = "N"c
         Else
-            TempMove.Code = "f"
+            TempMove.Code = "f"c
         End If
+        'Saves a copy of the BitMove inside the Move object, in case it needs to be called later (eg: iterative deepening, or altering the board afterwards).
+        TempMove.BitMove = BitMove
     End Sub
 
     'Function which converts a string coordinate (eg: "54") to its BitMove counterpart (eg: "00101100")
-    Public Function ConvertStringToBitCoor(ByVal MoveString As String) As Byte
+    Public Function ConvertStringToBitCoor(ByVal MoveString As String) As Int16
         If MoveString = "-" OrElse MoveString = Nothing Then Return 0 'For blank En-Passant.
-        Return (Val(MoveString(0)) << 3) Or Val(MoveString(1))
+        Return CShort((CCharInt(MoveString(0)) << 3) Or Val(MoveString(1)))
     End Function
 
 
 
-    'Subroutine which creates the TrueFalse Table of the selected player (controlled by the Variable FixWhite).
+    'Method which creates the TrueFalse Table of the selected player (controlled by the Variable FixWhite).
     'This is done by generating all the legal moves of the pieces that could influence the enemy king's motion.
     'This creates a 'field' around the king (stating where its legal moves are), along with creating pinned pieces
     'and checks.
-    Public Sub FixTFTables(ByRef Board(,) As Char, ByVal FixWhite As Boolean, ByRef TrueFalseTable(,) As Char, ByRef KPos As Byte, ByRef InCheck As Byte, ByVal EnPassant As Byte)
-        Dim dx, dy As SByte
+    'This method returns true if the player to move contains at least 1 piece (ie: anything other than pawns). This will be useful for detecting Zugzwang in Null Move Pruning.
+    Public Sub FixTFTable(ByRef Board(,) As Char, ByVal FixWhite As Boolean, ByRef TFTableToFix(,) As Char, ByRef KPos As Int16, ByRef InCheck As UInt16, ByVal CanICastle As Boolean, ByVal EnPassant As Int16, Optional ByRef CheckForPiece As Boolean = False)
+        Dim dx, dy As Int16
+        Dim PieceInfluenceKing As Boolean
         'Resets TFTables.
-        Array.Copy(MasterTrueTable, TrueFalseTable, 64)
+        Array.Copy(MasterTrueTable, TFTableToFix, 64)
         If FixWhite Then
-            For y As SByte = 0 To 7
-                For x As SByte = 0 To 7
+            For y = 0S To 7S
+                For x = 0S To 7S
                     If Char.IsLower(Board(x, y)) Then
                         'Calculates distances between piece and the enemy king.
-                        dx = Math.Abs(((KPos And 56) >> 3) - x)
-                        dy = Math.Abs((KPos And 7) - y)
-                        If Board(x, y) = "p" Then
-                            If Math.Max(dx, dy) <= 2 AndAlso (KPos And 7) >= y Then
-                                'Pawn could influence king motion - calculate legal moves.
-                                BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "b" Then
-                            If Math.Abs(dx - dy) <= 2 Then
-                                'Piece could influence king motion - calculate legal moves.
-                                BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "n" Then
-                            If Math.Max(dx, dy) <= 3 AndAlso dx + dy <= 5 Then
-                                'Piece could influence king motion - calculate legal moves.
-                                BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "r" Then
-                            If Math.Min(dx, dy) <= 1 Then
-                                'Piece could influence king motion - calculate legal moves.
-                                BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "q" Then
-                            If Math.Min(dx, dy) <= 1 OrElse Math.Abs(dx - dy) <= 2 Then
-                                'Piece could influence king motion - calculate legal moves.
-                                BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Math.Max(dx, dy) <= 2 Then 'is a king.
-                            'Piece could influence king motion - calculate legal moves.
-                            BlackPieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                        End If
+                        dx = Math.Abs(((KPos And 56S) >> 3) - x)
+                        dy = Math.Abs((KPos And 7S) - y)
+                        Select Case Board(x, y)
+                            Case "p"c
+                                'If the king hasn't castled, a pawn on a2 needs to prevent a castling attempt.
+                                PieceInfluenceKing = (KPos And 7) >= y AndAlso (Math.Max(dx, dy) <= 2 OrElse (CanICastle AndAlso y = 6))
+                            Case "b"c
+                                PieceInfluenceKing = Math.Abs(dx - dy) <= 2
+                            Case "n"c
+                                PieceInfluenceKing = Math.Max(dx, dy) <= 3 AndAlso dx + dy <= 5
+                            Case "r"c
+                                'If the king can castle, the rook might be able to cut off the king's motion - give the rook one more move of sight.
+                                PieceInfluenceKing = Math.Min(dx, dy) <= If(CanICastle, 2, 1)
+                            Case "q"c
+                                PieceInfluenceKing = Math.Min(dx, dy) <= 1 OrElse Math.Abs(dx - dy) <= 2
+                            Case Else
+                                PieceInfluenceKing = Math.Max(dx, dy) <= 2 'is a king.
+                        End Select
+                        If PieceInfluenceKing Then BlackPieceLegalMoves(Board, CUShort(x), CUShort(y), TFTableToFix, CUShort(KPos), InCheck, CUShort(EnPassant))
+                    ElseIf CheckForPiece AndAlso Board(x, y) <> " " Then
+                        'Our position contains at least one minor / major piece, and so we are _probably_ not in Zugzwang.
+                        If Board(x, y) = "B" OrElse Board(x, y) = "N" OrElse Board(x, y) = "R" OrElse Board(x, y) = "Q" Then CheckForPiece = False
                     End If
                 Next
             Next
         Else 'Identical code but for the white pieces (fixing the Black TFTable).
-            For y As SByte = 0 To 7
-                For x As SByte = 0 To 7
+            For y = 0S To 7S
+                For x = 0S To 7S
                     If Char.IsUpper(Board(x, y)) Then
-                        dx = Math.Abs(((KPos And 56) >> 3) - x)
-                        dy = Math.Abs((KPos And 7) - y)
-                        If Board(x, y) = "P" Then
-                            If Math.Max(dx, dy) <= 2 AndAlso (KPos And 7) <= y Then
-                                WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "B" Then
-                            If Math.Abs(dx - dy) <= 2 Then
-                                WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "N" Then
-                            If Math.Max(dx, dy) <= 3 AndAlso dx + dy <= 5 Then
-                                WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "R" Then
-                            If Math.Min(dx, dy) <= 1 Then
-                                WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Board(x, y) = "Q" Then
-                            If Math.Min(dx, dy) <= 1 OrElse Math.Abs(dx - dy) <= 2 Then
-                                WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                            End If
-                        ElseIf Math.Max(dx, dy) <= 2 Then 'is a king.
-                            WhitePieceLegalMoves(Board, x, y, TrueFalseTable, KPos, InCheck, EnPassant)
-                        End If
+                        dx = Math.Abs(((KPos And 56S) >> 3) - x)
+                        dy = Math.Abs((KPos And 7S) - y)
+                        Select Case Board(x, y)
+                            Case "P"c
+                                PieceInfluenceKing = (KPos And 7) <= y AndAlso (Math.Max(dx, dy) <= 2 OrElse (CanICastle AndAlso y = 1))
+                            Case "B"c
+                                PieceInfluenceKing = Math.Abs(dx - dy) <= 2
+                            Case "N"c
+                                PieceInfluenceKing = Math.Max(dx, dy) <= 3 AndAlso dx + dy <= 5
+                            Case "R"c
+                                PieceInfluenceKing = Math.Min(dx, dy) <= If(CanICastle, 2, 1)
+                            Case "Q"c
+                                PieceInfluenceKing = Math.Min(dx, dy) <= 1 OrElse Math.Abs(dx - dy) <= 2
+                            Case Else
+                                PieceInfluenceKing = Math.Max(dx, dy) <= 2 'is a king.
+                        End Select
+                        If PieceInfluenceKing Then WhitePieceLegalMoves(Board, CUShort(x), CUShort(y), TFTableToFix, CUShort(KPos), InCheck, CUShort(EnPassant))
+                    ElseIf CheckForPiece AndAlso Board(x, y) <> " " Then
+                        If Board(x, y) = "b" OrElse Board(x, y) = "n" OrElse Board(x, y) = "r" OrElse Board(x, y) = "q" Then CheckForPiece = False
                     End If
                 Next
             Next
@@ -397,25 +445,27 @@ Partial Public Class CoreMethods
 
 
 
-    'Algorithm that returns the weight / value of a given piece. Links to the array of hashed values PieceValue.
-    'Note that the input of this function must be uppercase!!
-    Public Function ReturnPieceValue(ByVal Piece As Char) As Int16
-        Return PieceValue(Asc(Piece) Mod 11)
+
+    'Algorithm that returns the weight / value of a given piece. Links to the array of hashed values PieceValue. Aggressive Inlining
+    'replaces all references of the function (which appears many times in my program) with the function itself, to reduce on overhead.
+    <MethodImpl(MethodImplOptions.AggressiveInlining)>
+    Public Function ReturnPieceValue(ByVal Piece As Char) As Integer
+        Return PieceValue(Asc(UCase(Piece)) Mod 11)
     End Function
 
 
     'Function which counts up all the material (and their values) on the board. Stores this information in two
     'variables - one for white's total material count, and the other for black's total material count.
-    Public Function CountMaterial(ByVal Board(,) As Char) As UInt16()
-        Dim MaterialCount(1) As UInt16
-        For y As Byte = 0 To 7
-            For x As Byte = 0 To 7
-                If Board(x, y) <> " " Then
+    Public Function CountMaterial(ByVal Board(,) As Char) As Integer()
+        Dim MaterialCount(1) As Integer
+        For y = 0 To 7
+            For x = 0 To 7
+                If Not (Board(x, y) = " "c OrElse UCase(Board(x, y)) = "K"c) Then
                     'Add the value of the piece to either White or Black's total.
                     If Char.IsUpper(Board(x, y)) Then
                         MaterialCount(0) += ReturnPieceValue(Board(x, y))
                     Else
-                        MaterialCount(1) += ReturnPieceValue(UCase(Board(x, y)))
+                        MaterialCount(1) += ReturnPieceValue(Board(x, y))
                     End If
                 End If
             Next
@@ -424,7 +474,7 @@ Partial Public Class CoreMethods
     End Function
 
     'Function that hashes a chess position (including its details) into a 64-bit number using the 'Zobrist Hash' algorithm.
-    Public Function ZobristHashPosition(ByVal Board(,) As Char, ByVal isWhite As Boolean, ByVal WCanCastle As CanCastle, ByVal BCanCastle As CanCastle, ByVal EnPassant As Byte) As UInt64
+    Public Function ZobristHashPosition(ByVal Board(,) As Char, ByVal isWhite As Boolean, ByVal WCanCastle As CanCastle, ByVal BCanCastle As CanCastle, ByVal EnPassant As Int16) As UInt64
         ZobristHashPosition = 0
         For y As Byte = 0 To 7
             For x As Byte = 0 To 7
@@ -449,23 +499,23 @@ Partial Public Class CoreMethods
 
 
     'Subroutine that converts a Move into standard PGN chess notation (eg: e4, Nf4, Ka2).
-    Public Function MoveConverter(ByVal Board(,) As Char, ByVal TempMove As Move, ByVal EnPassant As Byte)
+    Public Function MoveConverter(ByVal Board(,) As Char, ByVal TempMove As Move, ByVal EnPassant As Int16) As String
         'Overload function for no constraints being added to the move.
         Return MoveConverter(Board, TempMove, True, 255, EnPassant, Nothing)
     End Function
-    Public Function MoveConverter(ByVal Board(,) As Char, ByVal TempMove As Move, ByVal isWhite As Boolean, ByVal KPos As Byte, ByVal EnPassant As Byte, ByVal TFTable(,) As Char) As String
-        Dim MovedPiece As Char = UCase(Board(TempMove.OldMoveX, TempMove.OldMoveY))
+    Public Function MoveConverter(ByVal Board(,) As Char, ByVal TempMove As Move, ByVal isWhite As Boolean, ByVal KPos As Int16, ByVal EnPassant As Int16, ByVal TFTable(,) As Char) As String
+        Dim MovedPiece As Char = UCase(Board(Integer.Parse(TempMove.OldMoveX), Integer.Parse(TempMove.OldMoveY)))
         'Pawns operate differently with standard chess notation - when moving a pawn, we give its column (a-h),
         'then add its file that it is moving to. For all other pieces, we state the name of the piece, then its
         'end coordinates.
         If MovedPiece <> " " Then
             If MovedPiece = "P" Then
-                MoveConverter = Chr(Val(TempMove.OldMoveX) + 97)
+                MoveConverter = Chr(Integer.Parse(TempMove.OldMoveX) + 97)
                 'Code for detecting castling.
-            ElseIf MovedPiece = "K" AndAlso TempMove.OldMoveX = 4 AndAlso (TempMove.NewMoveY = 0 OrElse TempMove.NewMoveY = 7) Then
-                If TempMove.NewMoveX = 6 Then 'Is king-side castling.
+            ElseIf MovedPiece = "K" AndAlso TempMove.OldMoveX = "4" AndAlso (TempMove.NewMoveY = "0" OrElse TempMove.NewMoveY = "7") Then
+                If TempMove.NewMoveX = "6" Then 'Is king-side castling.
                     Return "O-O" 'Notation for KS castling.
-                ElseIf TempMove.NewMoveX = 2 Then ''Is queen-side castling.
+                ElseIf TempMove.NewMoveX = "2" Then ''Is queen-side castling.
                     Return "O-O-O" 'Notation for QS castling.
                 Else
                     MoveConverter = MovedPiece
@@ -473,20 +523,20 @@ Partial Public Class CoreMethods
             Else
                 MoveConverter = MovedPiece
             End If
-            If Board(TempMove.NewMoveX, TempMove.NewMoveY) <> " " OrElse (UCase(MovedPiece) = "P" AndAlso EnPassant = ConvertStringToBitCoor(TempMove.NewMoveX & TempMove.NewMoveY)) Then
+            If Board(Integer.Parse(TempMove.NewMoveX), Integer.Parse(TempMove.NewMoveY)) <> " " OrElse (UCase(MovedPiece) = "P" AndAlso EnPassant = ConvertStringToBitCoor(TempMove.NewMoveX & TempMove.NewMoveY)) Then
                 'Is a capture move - add an "x" followed by the coordinates of the captured piece.
                 MoveConverter &= "x" & CoorToPGNConverter(TempMove.NewMoveX & TempMove.NewMoveY)
             Else
-                If MovedPiece <> "P" Then MoveConverter &= Chr(Val(TempMove.NewMoveX) + 97)
-                MoveConverter &= 8 - TempMove.NewMoveY
+                If MovedPiece <> "P" Then MoveConverter &= Chr(Integer.Parse(TempMove.NewMoveX) + 97)
+                MoveConverter &= 8 - Integer.Parse(TempMove.NewMoveY)
             End If
             'Code for pawn promotions.
-            If MovedPiece = "P" AndAlso (TempMove.NewMoveY = 0 OrElse TempMove.NewMoveY = 7) Then MoveConverter &= "=" & TempMove.Code
+            If MovedPiece = "P" AndAlso (TempMove.NewMoveY = "0" OrElse TempMove.NewMoveY = "7") Then MoveConverter &= "=" & TempMove.Code
 
             If KPos < 255 Then
                 'Once the move has been generated, run it through ConvertToMove, to see if the move can be interpreted in multiple ways.
                 'If it can, we need to add constraint(s) to the move.
-                Dim TestMove As New Move
+                Dim TestMove As Move
                 Dim TestPGN As String = MoveConverter
                 TestMove = ConvertToMove(TestPGN, Board, isWhite, KPos, TFTable)
                 Do Until TestMove.Code = "o" OrElse TestMove.Code = "Q" OrElse TestMove.Code = "N"
@@ -498,14 +548,14 @@ Partial Public Class CoreMethods
                         Select Case TestPGN.Length
                             Case MoveConverter.Length
                                 'Add column constraint.
-                                TestPGN = TestPGN.Insert(1, Chr(Val(TempMove.OldMoveX) + 97))
+                                TestPGN = TestPGN.Insert(1, Chr(Integer.Parse(TempMove.OldMoveX) + 97))
                             Case MoveConverter.Length + 1
                                 If Char.IsLetter(TestPGN(1)) Then
                                     'Add row constraint to replace column constraint.
-                                    TestPGN = TestPGN(0) & (8 - Val(TempMove.OldMoveY)) & TestPGN.Substring(2)
+                                    TestPGN = TestPGN(0) & (8 - Integer.Parse(TempMove.OldMoveY)) & TestPGN.Substring(2)
                                 Else
                                     'Add column constraint to row constraint.
-                                    TestPGN = TestPGN.Insert(1, Chr(Val(TempMove.OldMoveX) + 97))
+                                    TestPGN = TestPGN.Insert(1, Chr(Integer.Parse(TempMove.OldMoveX) + 97))
                                 End If
                             Case Else
                                 'No more constraints can be added. Return collision error.
@@ -516,32 +566,32 @@ Partial Public Class CoreMethods
                 Loop
                 MoveConverter = TestPGN
 
-                End If
-            Else
-                Return "ERROR"
+            End If
+        Else
+            Return "ERROR"
         End If
     End Function
 
 
     'Function that converts a standard chess move (eg: e4, Nf4, Ka2) into a Move.
-    Public Function ConvertToMove(ByVal InputMove As String, ByVal Board(,) As Char, ByVal isWhite As Boolean, ByVal KPos As Byte, ByVal TFTable(,) As Char) As Move
+    Public Function ConvertToMove(ByVal InputMove As String, ByVal Board(,) As Char, ByVal isWhite As Boolean, ByVal KPos As Int16, ByVal TFTable(,) As Char) As Move
         'Removes extra data from move (that is not useful to my system, ie: checks & pawn promotion tags).
-        InputMove = InputMove.TrimEnd(CChar("+"))
-        Dim ResultMove As New Move
-        ResultMove.Code = "o"
-        If InputMove(InputMove.Length - 2) = "=" Then
-            ResultMove.Code = InputMove(InputMove.Length - 1) 'Sets promotion piece.
-            InputMove = InputMove.Substring(0, InputMove.Length - 2)
+        Dim FormattedMove As String = InputMove.TrimEnd(CChar("+"))
+        Dim ResultMove As New Move With {.Code = "f"c} 'Denotes normal move.
+        ResultMove.Code = "o"c
+        If FormattedMove(FormattedMove.Length - 2) = "=" Then
+            ResultMove.Code = FormattedMove(FormattedMove.Length - 1) 'Sets promotion piece.
+            FormattedMove = FormattedMove.Substring(0, FormattedMove.Length - 2)
         End If
         'Sets end position to the last 2 characters of the move.
-        Dim TempEndPosition As String = PGNtoCoorConverter(InputMove.Substring(InputMove.Length - 2, 2))
+        Dim TempEndPosition As String = PGNtoCoorConverter(FormattedMove.Substring(FormattedMove.Length - 2, 2))
         ResultMove.NewMoveX = TempEndPosition(0)
         ResultMove.NewMoveY = TempEndPosition(1)
 
-        Select Case InputMove(0)
-            Case "B", "N", "R", "Q"
+        Select Case FormattedMove(0)
+            Case "B"c, "N"c, "R"c, "Q"c
                 'Constraint is used to specify which piece should move to the square (if there are multiple to choose from).
-                Dim Constraint As String = InputMove.Substring(1, InputMove.Length - 3)
+                Dim Constraint As String = FormattedMove.Substring(1, FormattedMove.Length - 3)
                 Constraint = Constraint.TrimEnd(CChar("x"))
                 If Constraint.Length = 2 Then 'Constraint length of 2 specifies the exact starting coordinates - retrieve these.
                     TempEndPosition = PGNtoCoorConverter(Constraint)
@@ -549,116 +599,116 @@ Partial Public Class CoreMethods
                     ResultMove.OldMoveY = TempEndPosition(1)
                 Else
                     Dim TempPiece As Char 'Represents the piece we are looking for.
-                    If isWhite Then TempPiece = InputMove(0) Else TempPiece = LCase(InputMove(0))
+                    If isWhite Then TempPiece = FormattedMove(0) Else TempPiece = LCase(FormattedMove(0))
                     'Creates temporary, empty board that holds TempPiece at the ending coordinates.
                     Dim EmptyBoard(7, 7) As Char
                     For y As Byte = 0 To 7
                         For x As Byte = 0 To 7
-                            EmptyBoard(x, y) = " "
+                            EmptyBoard(x, y) = " "c
                         Next
                     Next
-                    EmptyBoard(ResultMove.NewMoveX, ResultMove.NewMoveY) = TempPiece
-                    Dim LegalMoves() As UInt16
-                    Array.Copy(MasterTrueTable, TrueTable, 64)
+                    EmptyBoard(Integer.Parse(ResultMove.NewMoveX), Integer.Parse(ResultMove.NewMoveY)) = TempPiece
+                    Dim LegalMovesTemp() As UInt16
                     'Calculate the legal moves of TempPiece on EmptyBoard. This produces a set of coordinates that that piece can move to (one of which will be the starting coordinates).
                     If isWhite Then
-                        LegalMoves = WhitePieceLegalMoves(EmptyBoard, Val(ResultMove.NewMoveX), Val(ResultMove.NewMoveY), TrueTable, 0, CannotCastle, 0)
+                        LegalMovesTemp = WhitePieceLegalMoves(EmptyBoard, UInt16.Parse(ResultMove.NewMoveX), UInt16.Parse(ResultMove.NewMoveY), MasterTrueTable, 0, CannotCastle, 0)
                     Else
-                        LegalMoves = BlackPieceLegalMoves(EmptyBoard, Val(ResultMove.NewMoveX), Val(ResultMove.NewMoveY), TrueTable, 0, CannotCastle, 0)
+                        LegalMovesTemp = BlackPieceLegalMoves(EmptyBoard, UInt16.Parse(ResultMove.NewMoveX), UInt16.Parse(ResultMove.NewMoveY), MasterTrueTable, 0, CannotCastle, 0)
                     End If
+                    Dim LegalMoves(LegalMovesTemp(0) - 1) As UInt16
+                    Array.Copy(LegalMovesTemp, 1, LegalMoves, 0, LegalMovesTemp(0))
 
                     'Checks if any of these moves contains TempPiece on Board. If so then that piece is the one that is moving, and hence we set that to be the starting coordinates.
-                    Dim MatchedMove As SByte = -1
-                    If LegalMoves IsNot Nothing Then
-                        For n As Byte = 0 To LegalMoves.Length - 1
-                            If Board((LegalMoves(n) And 56) >> 3, LegalMoves(n) And 7) = TempPiece Then
-                                Dim TestMoves() As UInt16
-                                'Matching piece found - check if it agrees with any Constraints.
-                                Dim ConstraintMatches As Boolean
-                                If Constraint = "" Then
-                                    ConstraintMatches = True
-                                Else
-                                    'Constraint must be one character long, and hence either specifies the exact
-                                    'rank that the piece is on, or the exact rile that the piece is on.
-                                    Select Case Constraint
-                                        Case "a" To "h"
-                                            'Row constraint - only accept move if its file agrees with the constraint's.
-                                            ConstraintMatches = (Asc(Constraint) - 97 = (LegalMoves(n) And 56) >> 3)
-                                        Case Else
-                                            'Rank constraint - only accept move if its rank agrees with the constraint's.
-                                            ConstraintMatches = ((8 - Constraint) = (LegalMoves(n) And 7))
-                                    End Select
-                                End If
-
-                                If ConstraintMatches Then
-                                    'Tests if move is valid by playing it on the original Board.
-                                    If isWhite Then
-                                        TestMoves = WhitePieceLegalMoves(Board, (LegalMoves(n) And 56) >> 3, LegalMoves(n) And 7, TFTable, 0, CannotCastle, 0)
-                                    Else
-                                        TestMoves = BlackPieceLegalMoves(Board, (LegalMoves(n) And 56) >> 3, LegalMoves(n) And 7, TFTable, 0, CannotCastle, 0)
-                                    End If
-                                    If TestMoves IsNot Nothing Then
-                                        For m As Byte = 0 To TestMoves.Length - 1
-                                            If (TestMoves(m) And 56) >> 3 = ResultMove.NewMoveX AndAlso (TestMoves(m) And 7) = ResultMove.NewMoveY Then
-                                                'Move is a match! And is therefore valid.
-                                                'Flags that there are multiple moves which satisfy then input move.
-                                                If MatchedMove > -1 Then ResultMove.Code = "c" : Exit For
-                                                MatchedMove = n
-                                            End If
-                                        Next
-                                        If ResultMove.Code = "c" Then Exit For
-                                    End If
-                                End If
-
+                    Dim MatchedMove As Integer = -1
+                    For n = 0 To LegalMoves.Length - 1 'for each move...
+                        If Board((LegalMoves(n) And 56) >> 3, LegalMoves(n) And 7) = TempPiece Then
+                            Dim TestMoves() As UInt16
+                            'Matching piece found - check if it agrees with any Constraints.
+                            Dim ConstraintMatches As Boolean
+                            If Constraint = "" Then
+                                ConstraintMatches = True
+                            Else
+                                'Constraint must be one character long, and hence either specifies the exact
+                                'rank that the piece is on, or the exact rile that the piece is on.
+                                Select Case Constraint
+                                    Case "a" To "h"
+                                        'Row constraint - only accept move if its file agrees with the constraint's.
+                                        ConstraintMatches = (Asc(Constraint) - 97 = (LegalMoves(n) And 56) >> 3)
+                                    Case Else
+                                        'Rank constraint - only accept move if its rank agrees with the constraint's.
+                                        ConstraintMatches = ((8 - Integer.Parse(Constraint)) = (LegalMoves(n) And 7))
+                                End Select
                             End If
-                            If ResultMove.Code = "c" Then Exit For
-                        Next
-                    End If
+
+                            If ConstraintMatches Then
+                                'Tests if move is valid by playing it on the original Board.
+                                If isWhite Then
+                                    TestMoves = WhitePieceLegalMoves(Board, (LegalMoves(n) And 56US) >> 3, LegalMoves(n) And 7US, TFTable, 0, CannotCastle, 0)
+                                Else
+                                    TestMoves = BlackPieceLegalMoves(Board, (LegalMoves(n) And 56US) >> 3, LegalMoves(n) And 7US, TFTable, 0, CannotCastle, 0)
+                                End If
+                                If TestMoves IsNot Nothing Then
+                                    For m = 1 To TestMoves(0)
+                                        If (TestMoves(m) And 56) >> 3 = Integer.Parse(ResultMove.NewMoveX) AndAlso (TestMoves(m) And 7) = Integer.Parse(ResultMove.NewMoveY) Then
+                                            'Move is a match! And is therefore valid.
+                                            'Flags that there are multiple moves which satisfy then input move.
+                                            If MatchedMove > -1 Then ResultMove.Code = "c"c : Exit For
+                                            MatchedMove = n
+                                        End If
+                                    Next
+                                    If ResultMove.Code = "c" Then Exit For
+                                End If
+                            End If
+
+                        End If
+                        If ResultMove.Code = "c" Then Exit For
+                    Next
 
                     If MatchedMove = -1 Then 'No Move Found.
                         Console.ForegroundColor = ConsoleColor.DarkRed
-                        Console.WriteLine("Unable to interpret move given constraints.")
-                        Console.ResetColor()
-                        ResultMove.Code = "a"
+                        Console.WriteLine($"Unable to interpret move {InputMove} given constraints.")
+                        Console.ForegroundColor = ConsoleColor.White
+                        ResultMove.Code = "a"c
                     Else 'Sets starting coordinates.
-                        ResultMove.OldMoveX = (LegalMoves(MatchedMove) And 56) >> 3
-                        ResultMove.OldMoveY = LegalMoves(MatchedMove) And 7
+                        ResultMove.OldMoveX = CStr((LegalMoves(MatchedMove) And 56) >> 3)
+                        ResultMove.OldMoveY = CStr(LegalMoves(MatchedMove) And 7)
                     End If
                 End If
 
-            Case "K", "O" 'As there is only one king for each player, we can easily retrieve the starting coordinates.
+            Case "K"c, "O"c 'As there is only one king for each player, we can easily retrieve the starting coordinates.
                 'Sets the start move to be the initial position of the king.
-                ResultMove.OldMoveX = (KPos And 56) >> 3
-                ResultMove.OldMoveY = KPos And 7
+                ResultMove.OldMoveX = CStr((KPos And 56) >> 3)
+                ResultMove.OldMoveY = CStr(KPos And 7)
                 'User is attempting to castle...
-                If InputMove = "O-O" Then
-                    ResultMove.NewMoveX = 6
-                    ResultMove.NewMoveY = 7 - (7 * (Val(isWhite) + 1))
-                ElseIf InputMove = "O-O-O" Then
-                    ResultMove.NewMoveX = 2
-                    ResultMove.NewMoveY = 7 - (7 * (Val(isWhite) + 1))
+                If FormattedMove = "O-O" Then
+                    ResultMove.NewMoveX = "6"
+                    ResultMove.NewMoveY = CStr(7 - (7 * (CInt(isWhite) + 1)))
+                ElseIf FormattedMove = "O-O-O" Then
+                    ResultMove.NewMoveX = "2"
+                    ResultMove.NewMoveY = CStr(7 - (7 * (CInt(isWhite) + 1)))
                 End If
 
             Case Else 'Is a pawn.
-                ResultMove.OldMoveX = Asc(InputMove(0)) - 97 'Converts the rank index to a number.
-                If InputMove.Length = 2 Then 'No Capture - pawn is moving 1 or 2 squares.
+                ResultMove.OldMoveX = CStr(Asc(FormattedMove(0)) - 97) 'Converts the rank index to a number.
+                If FormattedMove.Length = 2 Then 'No Capture - pawn is moving 1 or 2 squares.
                     Dim TempPiece As Char 'Represents the piece we are looking for.
-                    If isWhite Then TempPiece = "P" Else TempPiece = "p"
+                    If isWhite Then TempPiece = "P"c Else TempPiece = "p"c
                     For n As Byte = 1 To 2
                         'Searches 1 and 2 squares behind the end square, looking for TempPiece.
-                        If Board(ResultMove.OldMoveX, (ResultMove.NewMoveY - n * (2 * Val(isWhite) + 1))) = TempPiece Then
+                        Dim TestY As Integer = Integer.Parse(ResultMove.NewMoveY) - n * (2 * CInt(isWhite) + 1)
+                        If Board(Integer.Parse(ResultMove.OldMoveX), TestY) = TempPiece Then
                             'Pawn found - set starting coordinates.
-                            ResultMove.OldMoveY = (ResultMove.NewMoveY - n * (2 * Val(isWhite) + 1))
+                            ResultMove.OldMoveY = CStr(TestY)
                             Exit Select
                         End If
                     Next
                     'No pawn found.
                     Console.ForegroundColor = ConsoleColor.DarkRed
                     Console.WriteLine("Unable to interpret move given constraints.")
-                    Console.ResetColor()
-                    ResultMove.Code = "a"
+                    Console.ForegroundColor = ConsoleColor.White
+                    ResultMove.Code = "a"c
                 Else 'is a pawn capture move - set starting coordinates accordingly.
-                    ResultMove.OldMoveY = ResultMove.NewMoveY - (2 * Val(isWhite) + 1)
+                    ResultMove.OldMoveY = CStr(Integer.Parse(ResultMove.NewMoveY) - (2 * Val(isWhite) + 1))
                 End If
         End Select
 
