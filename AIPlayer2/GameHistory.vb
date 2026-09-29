@@ -1,4 +1,6 @@
-﻿'Stack that holds the Zobrist Keys & PGNs of all the positions that have previously appeared in the game. Used to enforce
+﻿Option Strict On
+
+'Stack that holds the Zobrist Keys & PGNs of all the positions that have previously appeared in the game. Used to enforce
 'three-fold repetition (both for the Chess form & for the AI), for FEN information, and to capture the PGN of the game.
 Public Class GameHistory
 
@@ -70,10 +72,10 @@ Public Class GameHistory
         If MoveArray Then Move()
         PGNMain(MainSize) = Value
         'If the move was not a pawn move or a capture, we increment the half-move counter. Otherwise, we reset it.
-        If (Value(0) >= "a" AndAlso Value(0) <= "h") OrElse Value.IndexOf("x"c) >= 0 Then
+        If (Value(0) >= "a" AndAlso Value(0) <= "h") OrElse Value.Contains("x"c) Then
             MainHalfSize = 0
         Else
-            MainHalfSize += 1
+            MainHalfSize += 1US
         End If
     End Sub
 

@@ -440,8 +440,14 @@ Partial Public Class CoreMethods
             End If
         End If
     End Function
-    Public Function ConvertBitboardstoBoard(ByRef State As BoardState) As Char(,)
+    Public Function ConvertBitboardstoBoard(ByRef State As BoardState, ByVal WKPos As UInt16, ByVal BKPos As UInt16) As Char(,)
+        'Initiates the board with full empty squares.
         Dim Board(7, 7) As Char
+        For y = 0 To 7
+            For x = 0 To 7
+                Board(x, y) = " "c
+            Next
+        Next
         Dim BoardMap As (Bitboard As UInt64, Symbol As Char)() = {
             (State.BitboardPawnWhite, "P"c),
             (State.BitboardKnightWhite, "N"c),
@@ -457,14 +463,19 @@ Partial Public Class CoreMethods
             While Map.Bitboard > 0UL
                 Dim BoardCoords = Unwrap1DBoardIndex(CUShort(BitOperations.TrailingZeroCount(Map.Bitboard)))
                 If Board(BoardCoords.x, BoardCoords.y) = " " Then
+                    Board(BoardCoords.x, BoardCoords.y) = Map.Symbol
+                Else
                     Console.ForegroundColor = ConsoleColor.DarkRed
                     Console.WriteLine("Experienced a Collision Error When Converting Bitboards into Board.")
-                Else
-                    Board(BoardCoords.x, BoardCoords.y) = Map.Symbol
                 End If
                 Map.Bitboard = Map.Bitboard And (Map.Bitboard - 1UL)
             End While
         Next
+        'Adds the kings.
+        Dim KCoor = Unwrap1DBoardIndex(WKPos)
+        Board(KCoor.x, KCoor.y) = "K"c
+        KCoor = Unwrap1DBoardIndex(BKPos)
+        Board(KCoor.x, KCoor.y) = "k"c
         Return Board
     End Function
     <MethodImpl(MethodImplOptions.AggressiveInlining)>

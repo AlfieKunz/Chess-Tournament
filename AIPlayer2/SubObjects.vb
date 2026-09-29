@@ -1,39 +1,51 @@
-﻿Imports System.Runtime.CompilerServices
+﻿Option Strict On
+
+Imports System.Runtime.CompilerServices
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar
 Imports Microsoft.VisualBasic.ApplicationServices
 
 
 'Class holding all the constants that my program needs - can be accessed by all classes.
 Public Class GlobalConstants
-    Public Shared StartingFENPosition As String = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    Public Shared ProgramName As String = "Chess Game & Artificial Intelligence" 'also known as 'chessbot 9000' - thanks stroganoff <3
-    Public Shared ProgramVersion As String = "v10"
-    Public Shared StartupPath As String = (AppDomain.CurrentDomain.BaseDirectory).TrimEnd("\"c)
+    Public Const StartingFENPosition As String = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    Public Const ProgramName As String = "Chess Game & Artificial Intelligence" 'also known as 'chessbot 9000' - thanks stroganoff <3
+    Public Const ProgramVersion As String = "v10.2"
+    Public Shared ReadOnly StartupPath As String = (AppDomain.CurrentDomain.BaseDirectory).TrimEnd("\"c)
 
-    Public Shared TranspositionTableSize As Byte = 64 - ((23)) 'Constant referring to how large the TranspositionTable object is.
+    Public Const TranspositionTableSize As Byte = 64 - ((26)) 'Constant referring to how large the TranspositionTable object is.
     'Used to determine how much to scate the ZobristValue by.
 
     'Structure holding the relative weights of all the pieces on the board.
     Public Structure PieceWeight
-        Public Shared Pawn As Integer = 100
-        Public Shared Knight As Integer = 300
-        Public Shared Bishop As Integer = 300
-        Public Shared Rook As Integer = 500
-        Public Shared Queen As Integer = 900
-        Public Shared King As Integer = 1000 'No meaning to this value, other than to de-prioritise king captures.
+        Public Const Pawn As Integer = 100
+        Public Const Knight As Integer = 300
+        Public Const Bishop As Integer = 300
+        Public Const Rook As Integer = 500
+        Public Const Queen As Integer = 900
+        Public Const King As Integer = 1000 'No meaning to this value, other than to de-prioritise king captures.
     End Structure
 
-    Public Shared MaxPieceLegalMoves As Byte = ((27)) - 1 'The maximum number of legal moves that can be theoretically made by a piece.
-    Public Shared MaxTurnLegalMoves As Byte = ((218)) - 1 'The max number of legal moves that can be made by on a given player's turn.
-    Public Shared MaxPositionsPerGame As UInt16 = 2048 'Holds the value of the maximum number of positions that can be stored in GameHistory.
+    'Structure holding the unique identifier for each piece type. Used for indexing into PieceValue, MVVLVAValues, ZobristHashTable.
+    Public Structure PieceIndex
+        Public Const Pawn As Integer = 0
+        Public Const Knight As Integer = 1
+        Public Const Bishop As Integer = 2
+        Public Const Rook As Integer = 3
+        Public Const Queen As Integer = 4
+        Public Const King As Integer = 5
+    End Structure
 
-    Public Shared DefaultGeneralOptions As String = "TTFTTFFF" '8-character string that represents the configuration of the program.
+    Public Const MaxPieceLegalMoves As Integer = ((27)) - 1 'The maximum number of legal moves that can be theoretically made by a piece.
+    Public Const MaxTurnLegalMoves As Integer = ((218))     'The max number of legal moves that can be made by on a given player's turn.
+    Public Const MaxPositionsPerGame As UInt16 = 2048 'Holds the value of the maximum number of positions that can be stored in GameHistory.
+
+    Public Const DefaultGeneralOptions As String = "TTFTTFFF" '8-character string that represents the configuration of the program.
     'Index: 0 = Sound, 1 = Opening Animation, 2 = Small Opening Book, 3 = Board Highlights, 4 = Piece Highlights, 5 = Touch Move Rule, 6 = Invisible Pieces, 7 = Hammad Mode (bad AI).
-    Public Shared DefaultAnimationSpeed As Byte = 2 'Represents the speed of the piece-moving animation: 0 = Off, 1 = VFast, 2 = Fast, 3 = Medium, 4 = Slow.
-    Public Shared MemoryThreshold As UInt64 = 256 * (1024 * 1024) 'Max amount of memory (in Bytes) that can be allocated before
+    Public Const DefaultAnimationSpeed As Byte = 2 'Represents the speed of the piece-moving animation: 0 = Off, 1 = VFast, 2 = Fast, 3 = Medium, 4 = Slow.
+    Public Const MemoryThreshold As UInt64 = 256 * (1024 * 1024) 'Max amount of memory (in Bytes) that can be allocated before
     'the AI's Transposition Table is reset.
 
-    Public Shared TrainingMovesPerPosition As Byte = 3 'A constant referring to the number of moves the user needs to make before
+    Public Const TrainingMovesPerPosition As Byte = 3 'A constant referring to the number of moves the user needs to make before
     'a new random position is chosen.
 
 End Class
@@ -41,7 +53,7 @@ End Class
 
 
 
-Public Class CanCastle
+Public Structure CanCastle
     Public KS As Boolean
     Public QS As Boolean
 
@@ -60,7 +72,7 @@ Public Class CanCastle
     Public Function CanICastle() As Boolean 'Returns True if any castling privileges exist.
         Return KS OrElse QS
     End Function
-End Class
+End Structure
 
 
 
@@ -142,6 +154,15 @@ Public Class AISearchSettings
     'Denotes all the variables that should not be displayed in the 'Modify AI Settings' panel.
     Public NonDisplayable() As String = {"NonDisplayable", "ReturnBestMove"}
 
+    'Constants that determine the 'off' values for each field
+    Public ReadOnly Property DisabledValues As New Dictionary(Of String, Object) From {
+        {"TimeToLive", CSByte(0)},
+        {"NullMoveRValue", Integer.MaxValue - 1},
+        {"MaxDepthExt", 0},
+        {"ReductionThreshold", Integer.MaxValue},
+        {"AspirationWidth", 0S}
+    }
+
     Public UseQuiescence As Boolean 'Will the AI use the Quiescence algorithm?
     Public UsePieceHeatMaps As Boolean 'Will the AI use PieceHeatMaps in its search?
     Public UseTranspositionTable As Boolean 'Will the AI use the Transposition Table in its search?
@@ -162,10 +183,10 @@ Public Class AISearchSettings
     'in checks, late move reductions, etc).
     Public MaxDepthExt As Integer 'Each time the AI is put into check, it increases its search depth by 1. This value limits the number of these 'extensions'
     'in a given path.
-    Public MoveReductionThreshold As Integer 'Denotes how many legal moves will be searched at the full depth (with the remaining, 'late' moves being
+    Public ReductionThreshold As Integer 'Denotes how many legal moves will be searched at the full depth (with the remaining, 'late' moves being
     'searched at a reduced depth to save time).
-    Public AspirationWindowWidth As Int16 'Denotes the (half) width of the Aspiration Window, for use in iterative deepening. Measured in centipawns (100 = pawn weight).
-    Public UseBitMasks As Boolean 'Denotes whether the AI is able to use bit-masks, for use in past pawn & isolated pawn detection.
+    Public AspirationWidth As Int16 'Denotes the (half) width of the Aspiration Window, for use in iterative deepening. Measured in centipawns (100 = pawn weight).
+    Public EvaluatePawnStructure As Boolean 'Denotes whether the AI is able to use bit-masks, for use in past pawn & isolated pawn detection.
     Public UsePVS As Boolean 'Can the AI use Principle Variation Search, for the root node?
 
 
@@ -180,6 +201,13 @@ Public Class AISearchSettings
         SetDefaultSettings()
     End Sub
 
+    Public ReadOnly Property DefaultValues As New Dictionary(Of String, Object) From {
+        {"TimeToLive", CSByte(4)},
+        {"NullMoveRValue", 3},
+        {"MaxDepthExt", 8},
+        {"ReductionThreshold", 4},
+        {"AspirationWidth", CShort(40)}
+    }
     Public Sub SetDefaultSettings()
         UseQuiescence = True
         UsePieceHeatMaps = True
@@ -190,13 +218,13 @@ Public Class AISearchSettings
         ReturnBestMove = True
         UpdateLifetimeStats = True
         NodeSearchUseHashing = False
-        TimeToLive = 4
-        NullMoveRValue = 3
+        TimeToLive = CSByte(DefaultValues("TimeToLive"))
+        NullMoveRValue = CInt(DefaultValues("NullMoveRValue"))
         StableSearch = False
-        MaxDepthExt = 8
-        MoveReductionThreshold = 4
-        AspirationWindowWidth = 40
-        UseBitMasks = True
+        MaxDepthExt = CInt(DefaultValues("MaxDepthExt"))
+        ReductionThreshold = CInt(DefaultValues("ReductionThreshold"))
+        AspirationWidth = CShort(DefaultValues("AspirationWidth"))
+        EvaluatePawnStructure = True
         UsePVS = True
     End Sub
 
@@ -217,9 +245,9 @@ Public Class AISearchSettings
         NullMoveRValue = Copier.NullMoveRValue
         If StableSearch <> Copier.StableSearch Then CoreAISettingsChanged = True : StableSearch = Copier.StableSearch
         MaxDepthExt = Copier.MaxDepthExt
-        MoveReductionThreshold = Copier.MoveReductionThreshold
-        If AspirationWindowWidth <> Copier.AspirationWindowWidth Then CoreAISettingsChanged = True : AspirationWindowWidth = Copier.AspirationWindowWidth
-        If UseBitMasks <> Copier.UseBitMasks Then CoreAISettingsChanged = True : UseBitMasks = Copier.UseBitMasks
+        ReductionThreshold = Copier.ReductionThreshold
+        If AspirationWidth <> Copier.AspirationWidth Then CoreAISettingsChanged = True : AspirationWidth = Copier.AspirationWidth
+        If EvaluatePawnStructure <> Copier.EvaluatePawnStructure Then CoreAISettingsChanged = True : EvaluatePawnStructure = Copier.EvaluatePawnStructure
         If UsePVS <> Copier.UsePVS Then CoreAISettingsChanged = True : UsePVS = Copier.UsePVS
         Return CoreAISettingsChanged
     End Function
@@ -229,15 +257,64 @@ End Class
 
 
 'Class holding the TFTable of each depth of the search.
-Public Class TFTableStorage
-    Public Table(7, 7) As Char
-    'Public Sub SetTable(ByVal TableToCopy(,) As Char)
-    '    Array.Copy(TableToCopy, Table, 64)
+Public Structure BoardState
+
+    'All Uint64 Bitboards. We don't store king bitboards here - this is done via KPos information.
+    Public BitboardPawnWhite As UInt64
+    Public BitboardPawnBlack As UInt64
+    Public BitboardKnightWhite As UInt64
+    Public BitboardKnightBlack As UInt64
+    Public BitboardBishopWhite As UInt64
+    Public BitboardBishopBlack As UInt64
+    Public BitboardRookWhite As UInt64
+    Public BitboardRookBlack As UInt64
+    Public BitboardQueenWhite As UInt64
+    Public BitboardQueenBlack As UInt64
+
+    Public ZobristValue As UInt64
+
+    Public MaterialCountWhite As Integer
+    Public MaterialCountBlack As Integer
+    Public PHMValueWhite As Integer 'Represents the base Piece Heat Map values for each player, for the base position, using the 100% middlegame values.
+    Public PHMValueBlack As Integer
+
+    Public EnPassant As UInt16
+    Public WhiteCanCastle As CanCastle
+    Public BlackCanCastle As CanCastle
+    Public HalfMoveSize As UInt16
+
+
+    'Public Sub CopyFrom(ByRef PreviousState As BoardState)
+
     'End Sub
-    'Public Sub CopyTableTo(ByVal TableToCopy(,) As Char)
-    '    Array.Copy(Table, TableToCopy, 64) 'Alfie Note 24.12.24 - this seems very unnecessary... why can't we just pass a reference to NegaMaxTFTable??
+    'Public Sub Reset()
+    '    ClearBitboards()
+    '    ZobristValue = 0UL
+    '    TFTable = 0UL
+    '    EnPassant = 0S
     'End Sub
-    'Public Function GetTable() As Char(,)
-    '    Return Table
-    'End Function
-End Class
+    Public Sub ClearBitboards()
+        BitboardPawnWhite = 0UL
+        BitboardPawnBlack = 0UL
+        BitboardKnightWhite = 0UL
+        BitboardKnightBlack = 0UL
+        BitboardBishopWhite = 0UL
+        BitboardBishopBlack = 0UL
+        BitboardRookWhite = 0UL
+        BitboardRookBlack = 0UL
+        BitboardQueenWhite = 0UL
+        BitboardQueenBlack = 0UL
+    End Sub
+End Structure
+
+Public Structure NegaMaxSearchTools
+    Dim TFTable As UInt64 'An attacking map of all pieces that could influence the king's motion (where the king is removed)
+    'Check detection is handled via the generation of TFTable (non-sliding pieces), and placing a queen at the king's location and casting rays via occupancy masks (sliding pieces).
+    'Resolving via captures & king movement handled via TFTable and KPos InCheck information, resolving via blocks handled by running checking piece bitboard for updated occupancy mask.
+    'An attacking map of all pieces that could influence the king's motion (where the king is removed)
+    Dim PinInfoStraight, PinInfoDiag As UInt64
+    Dim OccupancyMask, EnemyPieceMask As UInt64
+    Dim CheckInfo As UInt16 'Checking data is represented as a set of bits, in the format:
+    '00000000CDXXXYYY
+    'C = Check (Flag = 128). D = Double Check (Flag = 64). XY = Checking Piece Coordinates (Flag = 63)
+End Structure

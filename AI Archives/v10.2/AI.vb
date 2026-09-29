@@ -9,6 +9,7 @@ Imports System.DirectoryServices.ActiveDirectory
 Imports System.Formats.Asn1.AsnWriter
 Imports System.Globalization
 Imports System.IO
+Imports System.Net.NetworkInformation
 Imports System.Numerics
 Imports System.Reflection
 Imports System.Reflection.Metadata.Ecma335
@@ -788,9 +789,12 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             Dim TempState As BoardState = PrimaryState
             'Copies primary assets to temporary assets, then makes the move on the temporary board.
             Try
-                MakeMove(TempMove.BitMove, TempState, PlayerTurn, 0S)
+                Dim TempKPos As UInt16 = PrimaryMeKPos
+                MakeMove(TempMove.BitMove, TempState, PlayerTurn, TempKPos)
                 'Returns this new FEN. TODO: REMOVE CALL
-                Return ConvertToFEN(ConvertBitboardstoBoard(TempState), TempState.WhiteCanCastle, TempState.BlackCanCastle, TempState.EnPassant, Not PlayerTurn)
+                Dim WKPos As UInt16 = If(PlayerTurn, TempKPos, PrimaryEnemyKPos)
+                Dim BKPos As UInt16 = If(PlayerTurn, PrimaryEnemyKPos, TempKPos)
+                Return ConvertToFEN(ConvertBitboardstoBoard(TempState, WKPos, BKPos), TempState.WhiteCanCastle, TempState.BlackCanCastle, TempState.EnPassant, Not PlayerTurn)
             Catch ex As Exception
                 'The move is not valid on this position - there must be some error.
                 Console.ForegroundColor = ConsoleColor.DarkRed
