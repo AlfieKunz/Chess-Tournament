@@ -20,6 +20,7 @@ Imports System.Text
 Imports System.Text.RegularExpressions
 Imports System.Windows.Forms.AxHost
 Imports System.Windows.Forms.VisualStyles
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Rebar
 Imports System.Xml
 Imports Chess_AI.GlobalConstants
 
@@ -55,7 +56,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
 
 
     Private SearchSettings As New AISearchSettings 'Settings of the current search.
-    Private TotalPositionsSearched, TranspositionsFound, WinsFound As UInt64 'Numbers showing the stats of the current search.
+    Private TotalPositionsSearched, TotalFirstMoveBetaCuts, TotalBetaCutoffs, TranspositionsFound, WinsFound As UInt64 'Numbers showing the stats of the current search.
     Private LifetimePositions, LifetimeTranspositions, LifetimeCheckmates As UInt64 'Numbers showing the lifetime stats of the AI (persists
     'across multiple boot-ups).
     Private DetailedMoveOutput As Boolean = True
@@ -73,11 +74,13 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
 
     Private KillerMoves(255) As UInt16 'Array containing Killer Moves: non-capture moves which caused an alpha-beta cut off.
     'If we detect killer moves in sibling positions (ie: positions of the same depth), we search the Killer Move(s) first.
+    Private History(8191) As Integer 'Array containing global moves that cause beta cutoffs - AI leans which moves are generally good in a game.
 
     'Arrays that the CreateMoves function uses (delared before to save processing time in the search process).
     Private TempCaptureMoves(99) As UInt16 'Min size = 19
     Private TempCaptureMoveScores(99) As UInt16
     Private PawnPromotionMoves(15) As UInt16 'Min size = 7
+    Private HistoryMoves(99) As UInt16
     Private GoodMoves(99) As UInt16 'Min size = 49
     Private OtherMoves(99) As UInt16 'Min size = 99
     Private BadMoves(74) As UInt16 'Min size = 49
@@ -199,10 +202,12 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
         '    Next
         'End If
 
-        'Resets KillerMoves.
-        For n As Int16 = 0 To 255
-            KillerMoves(n) = 0
+        Array.Clear(KillerMoves, 0, KillerMoves.Length) 'Resets KillerMoves.
+        'Resets History by aging each index by 0.5
+        For n = 0 To History.Length - 1
+            History(n) = If(ResetTT, 0, History(n) \ 2)
         Next
+
         If ResetTT Then ResetTranspositionTable() Else IncreaseTTGeneration()
         PrimaryState.HalfMoveSize = 0
 
@@ -402,6 +407,8 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             InAspirationBreak = False
             TTIsEmpty = False
             TotalPositionsSearched = 0
+            TotalFirstMoveBetaCuts = 0
+            TotalBetaCutoffs = 0
             TranspositionsFound = 0
             WinsFound = 0
             HighestQuiescenceDepth = 1
@@ -411,26 +418,17 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             MasterDepth = Depth
             Dim TempMeKPos As UInt16
 
-            'If the AI needs to return the worst move in the position, it searches the moves from worst to best (in order to improve
-            'alpha-beta cutoff likelihood).
-            Dim StartValue, EndValue As Integer
-            Dim StepValue As SByte
-            If SearchSettings.ReturnBestMove Then
-                StartValue = 0
-                EndValue = BasePieceMoves.Length - 1
-                StepValue = 1
-            Else
-                StartValue = BasePieceMoves.Length - 1
-                EndValue = 0
-                StepValue = -1
-            End If
+            'If we are introducing blunders into the search, we keep track of all moves that are 'close' to the best move, with width as determined via
+            'the blunder temperature
+            Dim Candidates As New List(Of (BitMove As UInt16, Score As Integer))
 
             'Aspiration-Windows: if the previous search (via iterative deepening) produced a move with a valid score, we use this as an _estimate_ for this search,
             'and set the Alpha-Beta Bounds to be around this previous evaluation. If we were wrong, and the new score is outside this window (ie: upon searching
             'deeper, the position is significantly better / worse than the previous score suggested) then we must repeat the whole search again, this time with
             'an infinite window. To make things easier, we set this 'cut-off' move to be the next move to search, as it is likely very good :D.
+            'We disable this when introducing blunders.
             Dim AspirationWindow() As Int16
-            Dim DynamicAWWidth As Int16 = SearchSettings.AspirationWidth
+            Dim DynamicAWWidth As Int16 = If(SearchSettings.BlunderTemperature = 0US, SearchSettings.AspirationWidth, 0S)
             Dim AspirationWindowCode As String = ""
             Dim AWFailCount(1) As Integer
             If PreviousBestScore = -InfScore OrElse DynamicAWWidth <= 0 OrElse Depth < 4 Then
@@ -451,18 +449,13 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     If Not SearchSettings.OutputMoveDebugInfo Then Console.Write("Searching at a Depth of " & MasterDepth & "...") : Console.SetCursorPosition(0, Console.CursorTop)
                 End If
 
-                For n = StartValue To EndValue Step StepValue 'for each move...
+                For n = 0 To BasePieceMoves.Length - 1 'for each move...
+                    Dim Move As UInt16 = BasePieceMoves(If(SearchSettings.ReturnBestMove, n, BasePieceMoves.Length - n))
 
                     If SearchSettings.OutputToConsole AndAlso SearchSettings.OutputMoveDebugInfo Then
                         'Outputs the move that is currently being searched on, to the console.
-                        ConvertBitMoveToMove(CurrentMove, BasePieceMoves(n))
-                        Dim StringToOutput As String = "Searching at a Depth of " & MasterDepth & " - Processing Move: " & GetPGNFromMove(CurrentMove) & " ("
-                        If SearchSettings.ReturnBestMove Then
-                            StringToOutput &= n + 1
-                        Else
-                            StringToOutput &= BasePieceMoves.Length - n
-                        End If
-                        StringToOutput &= "/" & BasePieceMoves.GetUpperBound(0) + 1 & ")"
+                        ConvertBitMoveToMove(CurrentMove, Move)
+                        Dim StringToOutput As String = "Searching at a Depth of " & MasterDepth & " - Processing Move: " & GetPGNFromMove(CurrentMove) & " (" & n + 1 & "/" & BasePieceMoves.GetUpperBound(0) + 1 & ")"
                         Console.Write(StringToOutput.PadRight(64))
                         'Moves the Console Cursor Position 1 up, so that the newly-written string can be replaced by the next move.
                         Console.SetCursorPosition(0, Console.CursorTop)
@@ -473,9 +466,9 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     NegaMaxBoardStates(DepthFromRoot) = PrimaryState
                     TempMeKPos = PrimaryMeKPos
                     'Makes move on temp board, then calls NegaMax for this new position.
-                    MakeMove(BasePieceMoves(n), NegaMaxBoardStates(DepthFromRoot), PlayerTurn, TempMeKPos)
+                    MakeMove(Move, NegaMaxBoardStates(DepthFromRoot), PlayerTurn, TempMeKPos)
 
-                    If PrimaryState.MaterialCountWhite + PrimaryState.MaterialCountBlack = 0 Then
+                    If IsPositionDrawn(NegaMaxBoardStates(DepthFromRoot)) Then
                         'Enforce draw by repetition.
                         TotalPositionsSearched += 1UL
                         CurrentScore = 0
@@ -503,20 +496,23 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         Exit While
                     Else
                         If SearchSettings.ReturnBestMove Then
-                            If CurrentScore > BestMove.Score Then
-                                'Move has been beaten (better) - replace it.
-                                Alpha = CurrentScore
-                                BestMove.Score = CurrentScore
-                                ConvertBitMoveToMove(BestMove, BasePieceMoves(n))
-                                BestBitMove = BasePieceMoves(n)
+                            If CurrentScore > Alpha Then
+                                Candidates.Add((Move, CurrentScore))
+                                If CurrentScore > BestMove.Score Then
+                                    'If we are using blunder possibilities, we get alpha to 'lag' behind the best move, so that candidates are still introduced.
+                                    Alpha = CShort(Math.Max(-InfScore, CurrentScore - 6 * SearchSettings.BlunderTemperature)) 'Nothing(*) lies outside a 6sd width from the Boltzmann centre.
+                                    BestMove.Score = CurrentScore
+                                    ConvertBitMoveToMove(BestMove, Move)
+                                    BestBitMove = Move
+                                End If
                             End If
                         Else
                             If CurrentScore < BestMove.Score Then
                                 'Move has been beaten (worse) - replace it.
                                 Beta = CurrentScore
                                 BestMove.Score = CurrentScore
-                                ConvertBitMoveToMove(BestMove, BasePieceMoves(n))
-                                BestBitMove = BasePieceMoves(n)
+                                ConvertBitMoveToMove(BestMove, Move)
+                                BestBitMove = Move
                             End If
                         End If
                         If Beta <= Alpha Then Exit For 'The Alpha-Beta Window has been exceeded, and so the search is not valid. We must repeat it again at a larger window.
@@ -574,6 +570,24 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             End While
             InAspirationBreak = False
 
+            'Picks moves with boltzmann probability P \propto e^[s/T], using the Gumbel-max trick.
+            If SearchSettings.BlunderTemperature <> 0US AndAlso Candidates.Count > 0 Then
+                If ABORT Then
+                    'As we search moves from best to worst, a search that cuts off early will have a low chance of exploring blunders - hence, we only allow full searches.
+                    BestMove.Score = Int16.MaxValue
+                Else
+                    Dim BestKey As Double = Double.NegativeInfinity
+                    For Each c In Candidates
+                        Dim Key As Double = c.Score / SearchSettings.BlunderTemperature - Math.Log(-Math.Log(Random.Shared.NextDouble()))
+                        If Key > BestKey Then
+                            BestKey = Key
+                            BestBitMove = c.BitMove
+                            BestMove.Score = c.Score
+                            ConvertBitMoveToMove(BestMove, c.BitMove)
+                        End If
+                    Next
+                End If
+            End If
 
             'Formats the score inside the correct range, then flips score if it is black to move.
             BestMove.Score /= 100
@@ -601,6 +615,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
 
             If SearchSettings.OutputToConsole AndAlso DetailedMoveOutput Then
                 Console.WriteLine("Positions Searched: " & TotalPositionsSearched.ToString("N0"))
+                Console.WriteLine("First Move Cutoffs: " & Math.Round(100 * TotalFirstMoveBetaCuts / TotalBetaCutoffs, 2) & "%.")
                 If SearchSettings.UseTranspositionTable Then Console.WriteLine("Transposition Hits: " & TranspositionsFound.ToString("N0"))
                 If Not SearchSettings.StableSearch Then Console.WriteLine("Late Fail-High Pos: " & NoRepeatedSearches.ToString("N0"))
                 Console.WriteLine("Win Sequence Count: " & WinsFound.ToString("N0") & vbCr)
@@ -983,7 +998,11 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     Dim TempMeKPos As UInt16 = MeKPos
 
                     'Makes the current move onto the temporary board.
-                    NodeTestMakeMove(MoveBuffer(n), NegaMaxBoardStates(depth), isWhite, TempMeKPos)
+                    If SearchSettings.NodeSearchUseHashing Then
+                        MakeMove(MoveBuffer(n), NegaMaxBoardStates(depth), isWhite, TempMeKPos)
+                    Else
+                        NodeTestMakeMove(MoveBuffer(n), NegaMaxBoardStates(depth), isWhite, TempMeKPos)
+                    End If
 
                     If depth = 1 Then
                         EndPositionCount += 1UL
@@ -1442,6 +1461,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
 
         'Reset move buffers.
         PawnPromotionMoves(0) = 0
+        HistoryMoves(0) = 0
         TerribleMoves(0) = 0
         GoodMoves(0) = 0
         BadMoves(0) = 0
@@ -1538,7 +1558,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
         End If
 
         Dim TotalMoveCount As Integer = If(TTMoveFlag > 0, 1, 0) + CaptureCount
-        If IncludeNonCaptures Then TotalMoveCount += If(KillerMoveOneFlag > 0, 1, 0) + If(KillerMoveTwoFlag > 0, 1, 0) + PawnPromotionMoves(0) + GoodMoves(0) + OtherMoves(0) + BadMoves(0) + TerribleMoves(0)
+        If IncludeNonCaptures Then TotalMoveCount += If(KillerMoveOneFlag > 0, 1, 0) + If(KillerMoveTwoFlag > 0, 1, 0) + PawnPromotionMoves(0) + HistoryMoves(0) + GoodMoves(0) + OtherMoves(0) + BadMoves(0) + TerribleMoves(0)
         If TotalMoveCount = 0US Then Return 0US 'No moves found in the position.
 
         'At the end of the function, we merge all the category arrays into one - producing a huge, tiered,
@@ -1586,6 +1606,25 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             Next
             MoveBufferStrafe += TempMoveCount
 
+            TempMoveCount = HistoryMoves(0)
+            If TempMoveCount > 1US Then 'Sorts the History move bucket by score.
+                Dim HistBase As Integer = If(isWhite, 0, 4096)
+                For i As Integer = 2 To TempMoveCount
+                    Dim keyMove As UInt16 = HistoryMoves(i)
+                    Dim keyScore As Integer = History(HistBase + (keyMove And 4095US))
+                    Dim j As Integer = i - 1
+                    While j >= 1 AndAlso History(HistBase + (HistoryMoves(j) And 4095US)) < keyScore
+                        HistoryMoves(j + 1) = HistoryMoves(j)
+                        j -= 1
+                    End While
+                    HistoryMoves(j + 1) = keyMove
+                Next
+            End If
+            If TempMoveCount > 0US Then
+                HistoryMoves.AsSpan(1, TempMoveCount).CopyTo(MoveBuffer.AsSpan(MoveBufferStrafe))
+                MoveBufferStrafe += TempMoveCount
+            End If
+
             TempMoveCount = GoodMoves(0)
             If TempMoveCount > 0US Then
                 GoodMoves.AsSpan(1, TempMoveCount).CopyTo(MoveBuffer.AsSpan(MoveBufferStrafe))
@@ -1612,6 +1651,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
     End Function
 
     Public Sub ValidateAndPopulateMoveBuffer(ByVal LegalMoveArray() As UInt16, ByRef State As BoardState, ByVal PieceIndex As Integer, ByRef SearchInfo As NegaMaxSearchTools, ByVal NeedValidateMoves As Boolean, ByVal MeKPos As UInt16, ByVal EnemyKPos As UInt16, ByVal isWhite As Boolean, ByVal Strafe As Integer, ByRef CaptureCount As Integer, ByVal TTMove As UInt16, ByRef TTMoveFlag As Integer, ByVal KillerOneMove As UInt16, ByRef KillerOneFlag As Integer, ByVal KillerTwoMove As UInt16, ByRef KillerTwoFlag As Integer)
+        Dim HistoryBuffer As UInt16 = If(isWhite, 0US, 4096US)
         For n = 1 To LegalMoveArray(0)
             Dim Move As UInt16 = LegalMoveArray(n)
             'Locates TTMoves immediately.
@@ -1669,6 +1709,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     KillerTwoFlag = 1
                 Else '"Bucket" based move ordering system - get rid of bad moves first!!
                     Dim TargetSquare As UInt16 = Move And 63US
+                    Dim HistoryScore As Integer = History(HistoryBuffer + (Move And 4095US))
                     If PieceIndex = GlobalConstants.PieceIndex.Pawn AndAlso (TargetSquare < 16US OrElse TargetSquare > 47US) Then 'User is promoting a pawn (or is very close to).
                         PawnPromotionMoves(0) += 1US
                         PawnPromotionMoves(PawnPromotionMoves(0)) = Move
@@ -1677,8 +1718,12 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         'New square is controlled by an enemy pawn - ammend move list.
                         TerribleMoves(0) += 1US
                         TerribleMoves(TerribleMoves(0)) = Move
-                    ElseIf (SearchInfo.TFTable And PieceMap) = 0UL Then
-                        'Piece is positioned on a "False" on the TFTable, meaning the square is controlled by an enemy piece.
+                    ElseIf HistoryScore > 200 Then
+                        'Move has consistently caused beta cutoffs elsewhere in the search.
+                        HistoryMoves(0) += 1US
+                        HistoryMoves(HistoryMoves(0)) = Move
+                    ElseIf (SearchInfo.TFTable And PieceMap) = 0UL OrElse HistoryScore < -200 Then
+                        'Piece is positioned on a "False" on the TFTable (meaning the square is controlled by an enemy piece), or has a history of causing no beta cutoffs. 
                         BadMoves(0) += 1US
                         BadMoves(BadMoves(0)) = Move
                     ElseIf (KingDangerMapKnight(EnemyKPos) And PieceMap) <> 0UL Then
@@ -2130,6 +2175,11 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
         ZobristValue = ZobristValue Xor ZobristHashConstants(8)
     End Sub
 
+    'Sub that adds a move to the History array, containing bonus, malus, and gravity.
+    Private Sub UpdateHistory(ByVal Move As UInt16, ByVal isWhite As Boolean, ByVal Bonus As Integer)
+        Dim Index As UInt16 = If(isWhite, 0US, 4096US) + (Move And 4095US)
+        History(Index) += Bonus - History(Index) * Math.Abs(Bonus) \ 16384 'Gravity formula, where 16384 is the maximum history limit.
+    End Sub
 
 
 
@@ -2147,6 +2197,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
     '• Late Move Reductions.
     '• Internal Iterative Reductions.
     '• Killer Moves.
+    '• History Moves.
     Private Function NegaMax(ByRef State As BoardState, ByVal depth As Integer, ByVal NumDepthExt As Integer, ByVal isWhite As Boolean, ByVal MeKPos As UInt16, ByVal EnemyKPos As UInt16, ByVal Alpha As Int16, ByVal Beta As Int16, ByVal CanTakeNullMove As Boolean) As Int16
         If ABORT Then Return 0
         Dim SearchVars As NegaMaxSearchTools
@@ -2235,7 +2286,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
         End If
 
 
-        Dim CurrentMove, BestMove, StandPat As Int16
+        Dim CurrentScore, BestScore, StandPat As Int16
         Dim DepthExt, NoLegalMoves As Integer
         Dim NeedFullSearch As Boolean
         'Creates and forms the TFTable for the player to move. This subroutine will also flag for Minor & Major piece in the position.
@@ -2247,7 +2298,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             StandPat = Evaluate(State, isWhite, MeKPos, EnemyKPos)
             Alpha = Math.Max(Alpha, StandPat)
             If Beta <= Alpha Then Return StandPat 'Alpha-Beta Pruning.
-            BestMove = StandPat
+            BestScore = StandPat
         Else
             'Null Move Pruning - if we are neither in check, nor in the late endgame (to avoid zugzwang), we force the current player to pass their turn to the
             'opponent, and search this new positon at a reduced depth. If this new position is *not* good enough to cause a Alpha-Beta cutoff (note that we
@@ -2261,7 +2312,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     State.EnPassant = 0US
                     DepthFromRoot += 1
                     'Turn CanTakeNullMove off for the next move, to prevent infinite null moves.
-                    BestMove = -NegaMax(State, depth - NMPRValue, NumDepthExt, Not isWhite, EnemyKPos, MeKPos, -Beta, -Beta + 1S, False)
+                    BestScore = -NegaMax(State, depth - NMPRValue, NumDepthExt, Not isWhite, EnemyKPos, MeKPos, -Beta, -Beta + 1S, False)
                     DepthFromRoot -= 1
                     'Undos the null move, which is just equivalent to taking another null move (via the properties of xor in Zobrist Hashing).
                     State.EnPassant = OldEnPassant
@@ -2274,21 +2325,21 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         If ReplaceTTNode Then TranspositionTable(EntryInTT) = BackupTTEntry
                         Return 0
                     End If
-                    If Beta <= BestMove Then
+                    If Beta <= BestScore Then
                         If ReplaceTTNode Then
                             'Store position & its detail in the Transposition Table.
-                            TempTTEntry.Score = BestMove
+                            TempTTEntry.Score = BestScore
                             'Corrects score for checkmating patterns.
-                            If Math.Abs(BestMove) >= 29500 Then TempTTEntry.Score += CShort(If(BestMove > 0, DepthFromRoot, -DepthFromRoot))
+                            If Math.Abs(BestScore) >= 29500 Then TempTTEntry.Score += CShort(If(BestScore > 0, DepthFromRoot, -DepthFromRoot))
                             TempTTEntry.Flag = 1 'Caused an Alpha-beta cutoff, so the move may be even better than its score suggests - mark as lower bound.
                             TranspositionTable(EntryInTT) = TempTTEntry 'Replaces entry.
                         End If
-                        Return BestMove 'Alpha-Beta Pruning.
+                        Return BestScore 'Alpha-Beta Pruning.
                     End If
                 End If
             End If
 
-            BestMove = -InfScore
+            BestScore = -InfScore
             'Search Extensions - if we are put into check, we might want to explore deeper, to see if it leads anywhere...
             'TODO: Extend search for pawns pushing to the 7th rank, or if there is only 1 move available?
             If Not SearchSettings.StableSearch AndAlso SearchVars.CheckInfo <> 0US AndAlso NumDepthExt < SearchSettings.MaxDepthExt Then DepthExt = 1
@@ -2303,6 +2354,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
         If NoLegalMoves > 0 Then 'If any move exists...
             'Creates temp variables.
             Dim TempMeKPos As UInt16
+            Dim QuietMoveStartIndex As Integer = -1
 
             For n = MoveBufferStrafe To MoveBufferStrafe + NoLegalMoves - 1 'for each move...
                 Dim Move As UInt16 = MoveBuffer(n)
@@ -2324,6 +2376,12 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     If StandPat < Alpha - CapturedPieceValue - 200 Then Continue For
                 End If
 
+                'Saves the first quiet move index we come across. As we search ALL captures and pawn promotions before quiet moves, this serves as a buffer index for all quiet moves.
+                'A quiet move is classified by it not being a capture, an en-passant capture, or a pawn promotion. In my code, the latter two are well-handled by
+                'the 3rd flag bit being set. This has the unintended side affect of also labelling KS castling as non quiet moves - ahhh that's annoying :(.
+                Dim MoveIsQuiet As Boolean = Move <> TempTTEntry.BestMove AndAlso Move < 32768US AndAlso ((Move And 4096US) = 0US OrElse (Move And 28672US) = 20480US)
+                If QuietMoveStartIndex = -1 AndAlso MoveIsQuiet Then QuietMoveStartIndex = n
+
                 'Copies board info to temp variables.
                 DepthFromRoot += 1
                 NegaMaxBoardStates(DepthFromRoot) = State
@@ -2332,28 +2390,28 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                 MakeMove(Move, NegaMaxBoardStates(DepthFromRoot), isWhite, TempMeKPos)
                 TotalPositionsSearched += 1UL
 
-                If State.MaterialCountWhite = 0 AndAlso State.MaterialCountBlack = 0 Then
-                    'Enforce draw by repetition.
+                If IsPositionDrawn(NegaMaxBoardStates(DepthFromRoot)) Then
+                    'Enforce draw by insufficient material.
                     HighestQuiescenceDepth = Math.Max(HighestQuiescenceDepth, DepthFromRoot)
-                    CurrentMove = 0
+                    CurrentScore = 0
                 ElseIf Not SearchSettings.UseQuiescence AndAlso depth = 1 Then
                     'We have reached a leaf position - return the evaluation for this position.
-                    CurrentMove = Evaluate(NegaMaxBoardStates(DepthFromRoot), isWhite, TempMeKPos, EnemyKPos) 'Evaluate position for opponent.
+                    CurrentScore = Evaluate(NegaMaxBoardStates(DepthFromRoot), isWhite, TempMeKPos, EnemyKPos) 'Evaluate position for opponent.
                 Else 'No leaf node or drawn position (or are using Quiescence) - put position through NegaMax recursively.
                     HighestQuiescenceDepth = Math.Max(HighestQuiescenceDepth, DepthFromRoot)
 
                     If n = MoveBufferStrafe Then
                         'PVS Search: this is the first move - search it with a full window.
-                        CurrentMove = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
+                        CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
                     Else
                         'Late Move Reducitons & Internal Iterative Reductions - search everything but the first n moves at a reduced depth. If no hash move could be found, then the position
                         'is deemed 'more quiet', and so more moves are searched at a reduced depth.
                         'We disable this feature if there are no search extensions, as these are put into place when a position is deemed 'crutial' enough for a full search.
                         NeedFullSearch = True
-                        If Not SearchSettings.StableSearch AndAlso depth >= 3 AndAlso DepthExt = 0 AndAlso (n - MoveBufferStrafe + If(TempTTEntry.BestMove = 0, 1, 2)) >= SearchSettings.ReductionThreshold Then
+                        If Not SearchSettings.StableSearch AndAlso depth >= 3 AndAlso MoveIsQuiet AndAlso SearchVars.CheckInfo = 0US AndAlso DepthExt = 0 AndAlso (n - MoveBufferStrafe + If(TempTTEntry.BestMove = 0US, 1, 2)) >= SearchSettings.ReductionThreshold Then
                             'We use a tightened Alpha-Beta window here, so that if any fail-high nodes then are detected and sent back up the tree instantly.
-                            CurrentMove = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth - 2, NumDepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Alpha - 1S, -Alpha, True)
-                            If CurrentMove > Alpha Then
+                            CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth - 2, NumDepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Alpha - 1S, -Alpha, True)
+                            If CurrentScore > Alpha Then
                                 NoRepeatedSearches += 1
                             Else
                                 NeedFullSearch = False
@@ -2361,10 +2419,10 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         End If
                         If NeedFullSearch Then
                             'We are in a non-PV node - search with a null window.
-                            CurrentMove = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, If(SearchSettings.UsePVS, -Alpha - 1S, -Beta), -Alpha, True)
-                            If SearchSettings.UsePVS AndAlso CurrentMove > Alpha AndAlso CurrentMove < Beta Then
+                            CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, If(SearchSettings.UsePVS, -Alpha - 1S, -Beta), -Alpha, True)
+                            If SearchSettings.UsePVS AndAlso CurrentScore > Alpha AndAlso CurrentScore < Beta Then
                                 'The move was potentially better than the PV move, or caused a beta cutoff - make a full search.
-                                CurrentMove = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
+                                CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
                             End If
                         End If
                     End If
@@ -2389,8 +2447,8 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                     Return 0
                 End If
 
-                If CurrentMove > BestMove Then
-                    BestMove = CurrentMove 'Best Move has been beaten - replace it.
+                If CurrentScore > BestScore Then
+                    BestScore = CurrentScore 'Best Move has been beaten - replace it.
 
                     If ReplaceTTNode Then
                         'Updates the best move in the Transposition Table entry to match this new, best move.
@@ -2402,60 +2460,70 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         'I've been bug hunting for this for like 6 FREAKING MONTHS AND ALL IT TOOK WAS ONE STUPID IF CHECK!?!?!?
                         'I would be dancing around my room with excitement, but I'm mostly just angry that it took me this
                         'long to figure this out lmaoo. Still pretty happy & relieved, though :DD.
-                        If BestMove > Alpha Then TempTTEntry.Flag = 0
+                        If BestScore > Alpha Then TempTTEntry.Flag = 0
                     End If
 
-                    Alpha = Math.Max(Alpha, BestMove) 'Alpha = best move found for player.
+                    Alpha = Math.Max(Alpha, BestScore) 'Alpha = best move found for player.
                     If Beta <= Alpha Then 'Move was too strong for player; opponent will not choose this branch.
-                        If depth > 0 AndAlso Move < 32768US AndAlso KillerMoves(2 * DepthFromRoot) <> Move Then
-                            'The pruned move is not a capture move - add move to KillerMoves(), in the hope that the move
+                        If depth > 0 AndAlso MoveIsQuiet Then
+                            'A quiet move caused a beta cutoff - add to both KillerMoves() and History, in the hope that the move
                             'is also possible in sibling positions. If this move is detected, it is searched earlier.
                             Dim KillerIndex As Integer = 2 * DepthFromRoot
-                            KillerMoves(KillerIndex + 1) = KillerMoves(KillerIndex)
-                            KillerMoves(KillerIndex) = Move
+                            If KillerMoves(KillerIndex) <> Move Then
+                                KillerMoves(KillerIndex + 1) = KillerMoves(KillerIndex)
+                                KillerMoves(KillerIndex) = Move
+                            End If
+                            Dim HistoryBonus As Integer = Math.Min(16 * depth * depth, 1200)
+                            UpdateHistory(Move, isWhite, HistoryBonus)
+                            'History Malus: apply a negative update to all prior quiet moves.
+                            For i = QuietMoveStartIndex To n - 1
+                                UpdateHistory(MoveBuffer(i), isWhite, -HistoryBonus)
+                            Next
                         End If
                         If ReplaceTTNode Then
                             'Store position & its detail in the Transposition Table.
-                            TempTTEntry.Score = BestMove
+                            TempTTEntry.Score = BestScore
                             'Corrects score for checkmating patterns.
-                            If Math.Abs(BestMove) >= 29500 Then TempTTEntry.Score += CShort(If(BestMove > 0, DepthFromRoot, -DepthFromRoot))
+                            If Math.Abs(BestScore) >= 29500 Then TempTTEntry.Score += CShort(If(BestScore > 0, DepthFromRoot, -DepthFromRoot))
                             TempTTEntry.Flag = 1 'Caused an Alpha-beta cutoff, so the move may be even better than its score suggests - mark as lower bound.
                             TranspositionTable(EntryInTT) = TempTTEntry 'Replaces entry.
                         End If
 
-                        Return BestMove 'Alpha-Beta Pruning - return best move.
+                        If n = MoveBufferStrafe Then TotalFirstMoveBetaCuts += 1UL
+                        TotalBetaCutoffs += 1UL
+                        Return BestScore 'Alpha-Beta Pruning - return best move.
                     End If
                 End If
             Next
         End If
 
-        If Math.Abs(BestMove) >= 29500 Then
+        If Math.Abs(BestScore) >= 29500 Then
             If NoLegalMoves = 0 Then
                 'No legal move found for the player.
                 If SearchVars.CheckInfo <> 0US Then
                     'Checkmate!
-                    BestMove = -30000S + CShort(DepthFromRoot)
+                    BestScore = -30000S + CShort(DepthFromRoot)
                     If ReplaceTTNode Then TempTTEntry.Score = -30000
                     If PlayerTurn <> isWhite Then WinsFound += 1UL
                 Else 'Stalemate: return 0.
-                    BestMove = 0
+                    BestScore = 0
                     If ReplaceTTNode Then TempTTEntry.Score = 0
                 End If
                 TempTTEntry.Flag = 5 'Represents an end-state in the Transposition Table.
             ElseIf ReplaceTTNode Then
                 'Position leads to checkmate. Store this in the Transposition Table, with score referring to how many moves the mate is from *this* position.
                 'that way, when we encounter this position again, we can add DepthFromRoot to get the correct checkmate score.
-                TempTTEntry.Score = BestMove + CShort(If(BestMove > 0, DepthFromRoot, -DepthFromRoot))
+                TempTTEntry.Score = BestScore + CShort(If(BestScore > 0, DepthFromRoot, -DepthFromRoot))
             End If
         ElseIf ReplaceTTNode Then
-            TempTTEntry.Score = BestMove
+            TempTTEntry.Score = BestScore
         End If
 
         'Search completed without Alpha-beta cutoff - store position in Transposition Table.
         If ReplaceTTNode Then TranspositionTable(EntryInTT) = TempTTEntry
 
         'Return the best move's score found this iteration.
-        Return BestMove
+        Return BestScore
     End Function
 
 
@@ -2552,6 +2620,10 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
             Score += GetEEVTValue(BKPos, WKPos, State.MaterialCountBlack \ 100)
         End If
 
+        'Handles draws by invalid material: if a side has no mating material (no pawns and <= 1 minor piece), they cannot receive an advantageous score. Also penalise for every surviving enemy pawn
+        If State.BitboardPawnWhite = 0UL AndAlso State.MaterialCountWhite < GlobalConstants.PieceWeight.Rook Then Score = Math.Min(0, Score) - (15 * BitOperations.PopCount(State.BitboardPawnBlack))
+        If State.BitboardPawnBlack = 0UL AndAlso State.MaterialCountBlack < GlobalConstants.PieceWeight.Rook Then Score = Math.Max(0, Score) + (15 * BitOperations.PopCount(State.BitboardPawnWhite))
+
         Return CShort(Score)
     End Function
 
@@ -2633,6 +2705,26 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
 
         Return (WhitePHMEval, BlackPHMEval)
     End Function
+
+    'Function that determines if a given position is a drawn state, according to the FIDE rules.
+    Private Function IsPositionDrawn(ByRef State As BoardState) As Boolean
+        'The presence of any pawn, rook or queen always gives a non-drawn state.
+        If State.BitboardPawnWhite <> 0UL OrElse State.BitboardRookWhite <> 0UL OrElse State.BitboardQueenWhite <> 0UL Then Return False
+        If State.BitboardPawnBlack <> 0UL OrElse State.BitboardRookBlack <> 0UL OrElse State.BitboardQueenBlack <> 0UL Then Return False
+        'K vs K is always a draw.
+        If State.MaterialCountWhite = 0 AndAlso State.MaterialCountBlack = 0 Then Return True
+        'At this point, each player contains no pawns, and possibly minor pieces.
+        'K + B vs K, or K + N vs K, or K + B vs K + B, or K + N vs K + B, or K + N vs K + N is always a draw.
+        If State.MaterialCountWhite < GlobalConstants.PieceWeight.Rook AndAlso State.MaterialCountBlack < GlobalConstants.PieceWeight.Rook Then Return True
+        'K + N + N vs K is always a draw.
+        If State.MaterialCountBlack = 0 Then
+            If State.MaterialCountWhite = 2 * GlobalConstants.PieceWeight.Knight AndAlso State.BitboardBishopWhite = 0UL Then Return True
+        ElseIf State.MaterialCountWhite = 0 Then
+            If State.MaterialCountBlack = 2 * GlobalConstants.PieceWeight.Knight AndAlso State.BitboardBishopBlack = 0UL Then Return True
+        End If
+        Return False
+    End Function
+
 
     'Catch ex As Exception
     '    Console.WriteLine("oops")

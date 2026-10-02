@@ -6,6 +6,7 @@ Imports System.Net.Mime.MediaTypeNames
 Imports System.Reflection.Metadata.Ecma335
 Imports System.Runtime.CompilerServices
 Imports System.Text
+Imports System.Text.Json
 Imports System.Threading
 
 Imports AIPlayer1
@@ -31,6 +32,7 @@ Module Program
     Private HasCompletedMove As Boolean
 
     Private ResultMap() As Integer
+    Private MostRecentException As Exception
 
     Private BoardHistory1 As New AIPlayer1.GameHistory
     Private BoardHistory2 As New AIPlayer2.GameHistory
@@ -38,11 +40,13 @@ Module Program
     Private GameInvalid As Boolean = False
     Private TimeExceeded As Boolean
     Private TimePerMove As Decimal
+    Private GameStartedMidway As Boolean
 
 
     'NOTE: IF YOU CHANGE THE AI FILES, MAKE SURE TO CLEAN THE SOLUTION AFTERWARDS!!!!!!
     Private Sub AdjustIndividualAISettings()
         Player1Codename = Player1.GetVersion()
+        'AI1Settings.ReductionThreshold = 3
         'AI1Settings.UseTranspositionTable = True
         'AI1Settings.StableSearch = True
         'AI1Settings.AspirationWindowWidth = 0
@@ -50,7 +54,7 @@ Module Program
         'AI1Settings.UsePVS = False
         'AI1Settings.AspirationWindowWidth = 35
 
-        Player2Codename = Player2.GetVersion()
+        Player2Codename = Player2.GetVersion() & " (Relaxed History)"
         'AI2Settings.UseTranspositionTable = False
         'AI2Settings.StableSearch = True
         'AI2Settings.MoveReductionThreshold = 1000
@@ -163,11 +167,16 @@ Module Program
         Console.ForegroundColor = ConsoleColor.Green
         Console.WriteLine("Setup Complete. Ready to Play!" & vbCrLf & vbCrLf)
 
-        Player1White = True
-        Dim WinCount1, WinCount2 As Integer
+
+        Player1White = False
+        GameStartedMidway = False
+        Dim StartIndex As Integer = 851
+        Dim WinCount1 As Integer = 300
+        Dim WinCount2 As Integer = 270
         Dim NoGamesInvalid As Integer = 0
+
         Dim TournamentTime As TimeSpan
-        For n As Integer = 1 To NoMatches
+        For n As Integer = StartIndex To NoMatches
             Console.ForegroundColor = ConsoleColor.Blue
             Console.Write("Commensing Game " & n & " of " & NoMatches & ": ")
             Console.ForegroundColor = If(Player1White, ConsoleColor.White, ConsoleColor.DarkGray)
@@ -182,7 +191,7 @@ Module Program
 
             GameStopwatch.Restart()
             CurrentPlayerOne = Player1White
-            Dim GameResult As String = PlayGame(StartPositions((n - 1) Mod CInt(Math.Ceiling(NoMatches / 2))))
+            Dim GameResult As String = PlayGame(StartPositions((n - 1) Mod CInt(Math.Ceiling(NoMatches / 2))), n)
             GameStopwatch.Stop()
             TournamentTime += GameStopwatch.Elapsed
 
@@ -254,7 +263,7 @@ Module Program
 
 
 
-        OutputWinRatios(NoMatches, WinCount1, WinCount2, NoGamesInvalid, True)
+        OutputWinRatios(NoMatches, WinCount1, WinCount2, NoGamesInvalid, True, Not GameStartedMidway)
         Console.ForegroundColor = ConsoleColor.DarkYellow
         Console.WriteLine($"Total Simulation Time: {TournamentTime.Hours} hrs, {TournamentTime.Minutes} mins, {TournamentTime.Seconds} secs.")
         Console.ForegroundColor = ConsoleColor.White
@@ -263,7 +272,7 @@ Module Program
         Console.ReadLine()
     End Sub
 
-    Private Sub OutputWinRatios(ByVal NoMatches As Integer, ByVal WinCount1 As Integer, ByVal WinCount2 As Integer, Optional ByVal NoGamesInvalid As Integer = 0, Optional ByVal TournamentEnded As Boolean = True)
+    Private Sub OutputWinRatios(ByVal NoMatches As Integer, ByVal WinCount1 As Integer, ByVal WinCount2 As Integer, Optional ByVal NoGamesInvalid As Integer = 0, Optional ByVal TournamentEnded As Boolean = True, Optional ByVal OutputOutclasses As Boolean = True)
         NoMatches -= NoGamesInvalid
         If TournamentEnded Then
             Console.ForegroundColor = ConsoleColor.Blue
@@ -283,7 +292,7 @@ Module Program
         Console.Write(WinCount2 & " Losses (" & Math.Round(Player2WinPercentage) & "%), ")
         Console.ForegroundColor = ConsoleColor.Gray
         Console.Write(NoDraws & " Draws (" & Math.Round(DrawPercentage) & "%)")
-        If TournamentEnded Then
+        If TournamentEnded AndAlso OutputOutclasses Then
             Console.Write(", ")
             Console.ForegroundColor = ConsoleColor.DarkGreen
             Dim OutclassCount As Integer
@@ -321,7 +330,7 @@ Module Program
         Console.Write(WinCount1 & " Losses (" & Math.Round(Player1WinPercentage) & "%), ")
         Console.ForegroundColor = ConsoleColor.Gray
         Console.Write(NoDraws & " Draws (" & Math.Round(DrawPercentage) & "%)")
-        If TournamentEnded Then
+        If TournamentEnded AndAlso OutputOutclasses Then
             Console.Write(", ")
             Console.ForegroundColor = ConsoleColor.DarkGreen
             Dim OutclassCount As Integer
@@ -365,7 +374,7 @@ Module Program
         End If
     End Sub
 
-    Private Function PlayGame(ByVal InitialPosition As String) As String
+    Private Function PlayGame(ByVal InitialPosition As String, ByVal GameNumber As Integer) As String
         'InitialPosition = "3r3k/8/7p/51p1/4P1P1/7P/2q5/5K2 w - - 0 1"
         'BoardPositionCache = New List(Of Char(,))
         Player1.Reconfigure(InitialPosition, True)
@@ -520,10 +529,10 @@ Module Program
                     If HasCompletedMove Then
                         TimeExceeded = True
                         If CurrentPlayerOne Then
-                            Player1.AbortSearch()
+                            Player1.ABORTSearch()
                             If Player1UseLegacyMode Then
                                 For n = 0 To 3
-                                    Player1LegacyAI(n).AbortSearch()
+                                    Player1LegacyAI(n).ABORTSearch()
                                 Next
                             End If
                         Else
@@ -542,11 +551,11 @@ Module Program
                         TimeExceeded = True
 
                         If CurrentPlayerOne AndAlso Player1UseLegacyMode Then
-                            If LegacyAIMovedToHigherDepth(0) Then Player1LegacyAI(0).AbortSearch()
-                            Player1LegacyAI(1).AbortSearch()
-                            Player1.AbortSearch()
-                            Player1LegacyAI(2).AbortSearch()
-                            Player1LegacyAI(3).AbortSearch()
+                            If LegacyAIMovedToHigherDepth(0) Then Player1LegacyAI(0).ABORTSearch()
+                            Player1LegacyAI(1).ABORTSearch()
+                            Player1.ABORTSearch()
+                            Player1LegacyAI(2).ABORTSearch()
+                            Player1LegacyAI(3).ABORTSearch()
                         ElseIf Not CurrentPlayerOne AndAlso Player2UseLegacyMode Then
                             If LegacyAIMovedToHigherDepth(0) Then Player2LegacyAI(0).ABORTSearch()
                             Player2LegacyAI(1).ABORTSearch()
@@ -561,11 +570,11 @@ Module Program
                         Console.ForegroundColor = ConsoleColor.Blue
                         Console.SetCursorPosition(Console.CursorLeft, Console.CursorTop - 3)
                         If CurrentPlayerOne Then
-                            Player1LegacyAI(0).AbortSearch()
-                            Player1LegacyAI(1).AbortSearch()
-                            Player1.AbortSearch()
-                            Player1LegacyAI(2).AbortSearch()
-                            Player1LegacyAI(3).AbortSearch()
+                            Player1LegacyAI(0).ABORTSearch()
+                            Player1LegacyAI(1).ABORTSearch()
+                            Player1.ABORTSearch()
+                            Player1LegacyAI(2).ABORTSearch()
+                            Player1LegacyAI(3).ABORTSearch()
                         Else
                             Player2LegacyAI(0).ABORTSearch()
                             Player2LegacyAI(1).ABORTSearch()
@@ -636,7 +645,11 @@ Module Program
                 End If
 
             End If
-            If GameInvalid Then Return "-"
+            If GameInvalid Then
+                RecordError(GameNumber, InitialPosition, CurrentPosition, MovesPGN, MostRecentException)
+                MostRecentException = Nothing
+                Return "-"
+            End If
 
             Dim CurrentAIMove As String = If(CurrentPlayerOne, Player1.OutputMoveInfo(PreviousDepthBestMove1, True), Player2.OutputMoveInfo(PreviousDepthBestMove2, True))
             Console.Write("Move Received From ")
@@ -717,6 +730,7 @@ Module Program
                     End If
                 End If
             Catch ex As Exception
+                MostRecentException = ex
                 Console.ForegroundColor = ConsoleColor.DarkRed
                 Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
                 GameInvalid = True
@@ -886,6 +900,27 @@ Module Program
         Return TempMoveCode
     End Function
 
+    Private Sub RecordError(ByVal GameNumber As Integer, ByVal InitialFEN As String, ByVal CurrentFEN As String, ByVal PGNMoves As List(Of String), ByVal exc As Exception)
+        Dim StrBdr As New StringBuilder()
+        StrBdr.AppendLine(vbCrLf)
+        StrBdr.AppendLine($"Error Occured In Game: {GameNumber} ({DateTime.Now})")
+        StrBdr.AppendLine($"Matchup: {Player1Codename} ({If(Player1White, "W", "B")}) vs {Player2Codename} ({If(Player1White, "B", "W")})")
+        StrBdr.AppendLine($"Starting FEN : {InitialFEN}")
+        StrBdr.AppendLine($"FEN of Crash : {CurrentFEN}")
+        Dim MoveList As String = ""
+        For i = 0 To PGNMoves.Count - 1
+            If i Mod 2 = 0 Then MoveList &= ((i \ 2) + 1) & ". "
+            MoveList &= PGNMoves(i) & " "
+        Next
+        StrBdr.AppendLine("Moves: " + MoveList)
+        If exc IsNot Nothing Then
+            StrBdr.AppendLine("Crash Details:")
+            StrBdr.AppendLine(exc.ToString())
+        End If
+        StrBdr.AppendLine(vbCrLf)
+        IO.File.AppendAllText("GameErrors.log", StrBdr.ToString())
+    End Sub
+
 
 
 
@@ -1022,6 +1057,7 @@ Module Program
                 Player2LegacyAIBestMoves(0) = Player2LegacyAI(0).Search(StartingDepth - 2)
             End If
         Catch ex As Exception
+            MostRecentException = ex
             Console.ForegroundColor = ConsoleColor.DarkRed
             Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
             GameInvalid = True
@@ -1059,6 +1095,7 @@ Module Program
                         Player2LegacyAIBestMoves(5) = Player2LegacyAI(0).Search(StartingDepth + 3)
                     End If
                 Catch ex As Exception
+                    MostRecentException = ex
                     Console.ForegroundColor = ConsoleColor.DarkRed
                     Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
                     GameInvalid = True
@@ -1100,6 +1137,7 @@ Module Program
                 Player2LegacyAIBestMoves(1) = Player2LegacyAI(1).Search(StartingDepth - 1)
             End If
         Catch ex As Exception
+            MostRecentException = ex
             Console.ForegroundColor = ConsoleColor.DarkRed
             Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
             GameInvalid = True
@@ -1138,6 +1176,7 @@ Module Program
                         Player2LegacyAIBestMoves(6) = Player2LegacyAI(1).Search(StartingDepth + 4)
                     End If
                 Catch ex As Exception
+                    MostRecentException = ex
                     Console.ForegroundColor = ConsoleColor.DarkRed
                     Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
                     GameInvalid = True
@@ -1179,6 +1218,7 @@ Module Program
                 Player2LegacyAIBestMoves(2) = Player2.Search(StartingDepth)
             End If
         Catch ex As Exception
+            MostRecentException = ex
             Console.ForegroundColor = ConsoleColor.DarkRed
             Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
             GameInvalid = True
@@ -1220,6 +1260,7 @@ Module Program
                 Player2LegacyAIBestMoves(3) = Player2LegacyAI(2).Search(StartingDepth + 1)
             End If
         Catch ex As Exception
+            MostRecentException = ex
             Console.ForegroundColor = ConsoleColor.DarkRed
             Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
             GameInvalid = True
@@ -1261,6 +1302,7 @@ Module Program
                 Player2LegacyAIBestMoves(4) = Player2LegacyAI(3).Search(StartingDepth + 2)
             End If
         Catch ex As Exception
+            MostRecentException = ex
             Console.ForegroundColor = ConsoleColor.DarkRed
             Console.WriteLine("An error occured in the game: " & ex.ToString() & ". Neglecting game..." & vbCr)
             GameInvalid = True

@@ -2405,8 +2405,8 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
                         IsFirstMove = False
                     Else
-                        'Late Move Reducitons & Internal Iterative Reductions - search everything but the first n moves at a reduced depth. If no hash move could be found, then we are
-                        'less certain about the position: search one more move at full depth.
+                        'Late Move Reducitons & Internal Iterative Reductions - search everything but the first n moves at a reduced depth. If no hash move could be found, then the position
+                        'is deemed 'more quiet', and so more moves are searched at a reduced depth.
                         'We disable this feature if there are no search extensions, as these are put into place when a position is deemed 'crutial' enough for a full search.
                         NeedFullSearch = True
                         If Not SearchSettings.StableSearch AndAlso depth >= 3 AndAlso MoveIsQuiet AndAlso SearchVars.CheckInfo = 0US AndAlso DepthExt = 0 AndAlso (n - MoveBufferStrafe + If(ExistsTTMove, 2, 1)) >= SearchSettings.ReductionThreshold Then
