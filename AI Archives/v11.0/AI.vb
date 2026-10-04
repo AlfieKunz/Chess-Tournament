@@ -21,6 +21,7 @@ Imports System.Text.RegularExpressions
 Imports System.Windows.Forms.AxHost
 Imports System.Windows.Forms.VisualStyles
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Rebar
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock
 Imports System.Xml
 Imports Chess_AI.GlobalConstants
 
@@ -59,7 +60,7 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
     Private TotalPositionsSearched, TotalFirstMoveBetaCuts, TotalBetaCutoffs, TranspositionsFound, WinsFound As UInt64 'Numbers showing the stats of the current search.
     Private LifetimePositions, LifetimeTranspositions, LifetimeCheckmates As UInt64 'Numbers showing the lifetime stats of the AI (persists
     'across multiple boot-ups).
-    Private DetailedMoveOutput As Boolean = True
+    Private OutputSearchDebugInfo As Boolean = True
     Private HighestQuiescenceDepth As Integer 'Shows the maximum reached depth of a search that has not been ABORTed.
     Private NoRepeatedSearches As Integer
     Private NodeCount, EndPositionCount, PositionCollisions As UInt64 'Variables containing the stats of a Node Search.
@@ -382,8 +383,8 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
     End Function
 
     'Setter Functions for the DetailedMoveOutput attribute.
-    Public Sub SetDetailedMoveOutput(ByVal Value As Boolean)
-        DetailedMoveOutput = Value
+    Public Sub SetOutputSearchDebugInfo(ByVal Value As Boolean)
+        OutputSearchDebugInfo = Value
     End Sub
 
 
@@ -609,15 +610,18 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                 If SearchSettings.UseQuiescence Then Console.Write("-" & GetHighestQuiescenceDepth()) 'Retrieves the maximum reached depth via Quiescence (if enabled).
                 If ABORT Then Console.Write(" Incomplete. Predicted ") Else Console.Write(" Completed. ")
                 OutputMoveInfo(BestMove) 'Outputs the diagnostics for the current search.
-                If SearchSettings.OutputPath AndAlso SearchSettings.UseTranspositionTable AndAlso DetailedMoveOutput Then Console.WriteLine("Path = " & GenerateBestMoveLine(BestBitMove, Math.Abs(BestMove.Score) >= 295)) 'Generates the path of 'best moves' leading from this position.
+                If SearchSettings.OutputPath AndAlso SearchSettings.UseTranspositionTable AndAlso OutputSearchDebugInfo Then Console.WriteLine("Path = " & GenerateBestMoveLine(BestBitMove, Math.Abs(BestMove.Score) >= 295)) 'Generates the path of 'best moves' leading from this position.
             End If
 
-            If SearchSettings.OutputToConsole AndAlso DetailedMoveOutput Then
-                Console.WriteLine("Positions Searched: " & TotalPositionsSearched.ToString("N0"))
-                If TotalBetaCutoffs <> 0UL Then Console.WriteLine("First Move Cutoffs: " & Math.Round(100 * TotalFirstMoveBetaCuts / TotalBetaCutoffs, 2) & "%.")
-                If SearchSettings.UseTranspositionTable Then Console.WriteLine("Transposition Hits: " & TranspositionsFound.ToString("N0"))
-                If Not SearchSettings.StableSearch Then Console.WriteLine("Late Fail-High Pos: " & NoRepeatedSearches.ToString("N0"))
-                Console.WriteLine("Win Sequence Count: " & WinsFound.ToString("N0") & vbCr)
+            If SearchSettings.OutputToConsole Then
+                Console.Write("Positions Searched: " & TotalPositionsSearched.ToString("N0"))
+                If OutputSearchDebugInfo Then
+                    Console.WriteLine()
+                    If TotalBetaCutoffs <> 0UL Then Console.WriteLine("First Move Cutoffs: " & Math.Round(100 * TotalFirstMoveBetaCuts / TotalBetaCutoffs, 2) & "%")
+                    If SearchSettings.UseTranspositionTable Then Console.WriteLine("Transposition Hits: " & TranspositionsFound.ToString("N0"))
+                    If Not SearchSettings.StableSearch Then Console.WriteLine("Late Fail-High Pos: " & NoRepeatedSearches.ToString("N0"))
+                    Console.WriteLine("Win Sequence Count: " & WinsFound.ToString("N0") & vbCr)
+                End If
             End If
 
             If SearchSettings.UpdateLifetimeStats Then
@@ -2405,8 +2409,8 @@ Partial Public Class AI 'i shall thy the Alfie Alphafish (bit optimistic, I know
                         CurrentScore = -NegaMax(NegaMaxBoardStates(DepthFromRoot), depth + DepthExt - 1, NumDepthExt + DepthExt, Not isWhite, EnemyKPos, TempMeKPos, -Beta, -Alpha, True)
                         IsFirstMove = False
                     Else
-                        'Late Move Reducitons & Internal Iterative Reductions - search everything but the first n moves at a reduced depth. If no hash move could be found, then the position
-                        'is deemed 'more quiet', and so more moves are searched at a reduced depth.
+                        'Late Move Reducitons & Internal Iterative Reductions - search everything but the first n moves at a reduced depth. If no hash move could be found, then we are
+                        'less certain about the position: search one more move at full depth.
                         'We disable this feature if there are no search extensions, as these are put into place when a position is deemed 'crutial' enough for a full search.
                         NeedFullSearch = True
                         If Not SearchSettings.StableSearch AndAlso depth >= 3 AndAlso MoveIsQuiet AndAlso SearchVars.CheckInfo = 0US AndAlso DepthExt = 0 AndAlso (n - MoveBufferStrafe + If(ExistsTTMove, 2, 1)) >= SearchSettings.ReductionThreshold Then

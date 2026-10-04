@@ -54,7 +54,7 @@ Module Program
         'AI1Settings.UsePVS = False
         'AI1Settings.AspirationWindowWidth = 35
 
-        Player2Codename = Player2.GetVersion() & " (Relaxed History)"
+        Player2Codename = Player2.GetVersion()
         'AI2Settings.UseTranspositionTable = False
         'AI2Settings.StableSearch = True
         'AI2Settings.MoveReductionThreshold = 1000
@@ -168,11 +168,11 @@ Module Program
         Console.WriteLine("Setup Complete. Ready to Play!" & vbCrLf & vbCrLf)
 
 
-        Player1White = False
+        Player1White = True
         GameStartedMidway = False
-        Dim StartIndex As Integer = 851
-        Dim WinCount1 As Integer = 300
-        Dim WinCount2 As Integer = 270
+        Dim StartIndex As Integer = 1 'Default = 1
+        Dim WinCount1 As Integer = 0
+        Dim WinCount2 As Integer = 0
         Dim NoGamesInvalid As Integer = 0
 
         Dim TournamentTime As TimeSpan
