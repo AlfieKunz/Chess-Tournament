@@ -299,7 +299,7 @@ Module Program
             For Each m In ResultMap
                 If m = 2 Then OutclassCount += 1
             Next
-            Console.Write(OutclassCount & " Outclasses (" & Math.Round(OutclassCount * 100 / NoMatches) & "%).")
+            Console.Write(OutclassCount & " Outclasses (" & Math.Round(OutclassCount * 200 / NoMatches) & "%).")
         Else
             Console.Write(".")
         End If
